@@ -107,4 +107,10 @@ python scripts/migrate_subjects.py --work OL82563W --dry-run
 
 See [CONTRIBUTING.md](./CONTRIBUTING.md) for how to propose new tags, correct mappings, or update controlled vocabularies.
 
+Each type directory has a `proposals.md` file listing pending proposals, accepted additions, rejected terms (with reasoning), and deferred ideas. Check there before opening an issue.
+
+See [AGENTS.md](./AGENTS.md) for the taxonomy's core decision rules — useful both for human contributors and for AI-assisted proposal review.
+
+See [SCHEMA.md](./SCHEMA.md) for the vocabulary.json field reference.
+
 See [ROADMAP.md](./ROADMAP.md) for the project plan.

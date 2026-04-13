@@ -12,7 +12,11 @@ This repository uses GitHub Issues and Pull Requests as its primary workflow. Al
 
 Before opening an issue, search existing vocabulary files and open issues to confirm the term doesn't already exist under a different name or in a different type.
 
-### 2. Open a GitHub Issue
+### 2. Check the proposals file
+
+Each type directory has a `proposals.md` file. Before opening a GitHub Issue, check whether your term has already been proposed and why it was accepted, rejected, or deferred. Re-proposing a rejected term without new evidence or a meaningfully different definition is unlikely to succeed.
+
+### 3. Open a GitHub Issue
 
 Use the appropriate issue template (coming soon). In your proposal, include:
 
@@ -23,12 +27,13 @@ Use the appropriate issue template (coming soon). In your proposal, include:
 - **At least 3 example works** — title, author, OL Work ID if known
 - **Rationale** — why this term is missing and genuinely needed
 
-### 3. Pull Request
+### 4. Pull Request
 
 Once an issue has received positive discussion and rough consensus, open a PR that:
 
-- Adds the term in alphabetical order to the relevant `vocabulary.md`
+- Adds the term in alphabetical order to the relevant `vocabulary.md` and `vocabulary.json`
 - Updates the type's `README.md` if the addition clarifies or adjusts any rules
+- Moves the proposal entry in `proposals.md` from Pending to Accepted (with date and brief rationale)
 - References the issue number
 
 ---
