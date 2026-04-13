@@ -1,0 +1,32 @@
+{
+  "type": "content_formats",
+  "label": "Content Formats",
+  "description": "The physical or structural form of the work — the vessel that contains the content, independent of what that content is about.",
+  "controlled": true,
+  "tags": [
+    { "tag": "Almanac", "slug": "almanac", "definition": "Annual reference compiling statistics, facts, and forecasts organized by date or category" },
+    { "tag": "Anthology", "slug": "anthology", "definition": "A curated collection of works (stories, poems, essays) by multiple authors" },
+    { "tag": "Artbook", "slug": "artbook", "definition": "A work whose primary content is visual art, with minimal or supplementary text" },
+    { "tag": "Atlas", "slug": "atlas", "definition": "A collection of maps, often with accompanying geographic or thematic data" },
+    { "tag": "Autobiography", "slug": "autobiography", "definition": "A first-person account of the author's own life, written by the subject" },
+    { "tag": "Biography", "slug": "biography", "definition": "An account of a person's life written by someone other than the subject" },
+    { "tag": "Chronology", "slug": "chronology", "definition": "A work organized by dates and events, tracing a timeline" },
+    { "tag": "Diary", "slug": "diary", "definition": "Written in journal or diary form — dated entries presented as contemporaneous" },
+    { "tag": "Dictionary", "slug": "dictionary", "definition": "A reference work organized alphabetically, defining terms" },
+    { "tag": "Encyclopedia", "slug": "encyclopedia", "definition": "A comprehensive reference work covering a broad range of subjects" },
+    { "tag": "Essays", "slug": "essays", "definition": "A collection of short non-fiction prose pieces on distinct topics" },
+    { "tag": "Graphic Novel", "slug": "graphic-novel", "definition": "A narrative told primarily through sequential art (comics format); longer form" },
+    { "tag": "Letters", "slug": "letters", "definition": "A collection of correspondence, organized around an epistolary exchange" },
+    { "tag": "Lexicon", "slug": "lexicon", "definition": "A specialized vocabulary or word list for a particular subject domain" },
+    { "tag": "Manga", "slug": "manga", "definition": "Sequential art in Japanese comics format; typically serialized and read right-to-left" },
+    { "tag": "Memoir", "slug": "memoir", "definition": "A first-person narrative focused on a specific period, theme, or set of experiences in the author's life" },
+    { "tag": "Novel", "slug": "novel", "definition": "Long-form prose fiction (or narrative nonfiction); typically 40,000+ words" },
+    { "tag": "Novella", "slug": "novella", "definition": "Mid-length prose narrative; typically 17,500–40,000 words" },
+    { "tag": "Photography", "slug": "photography", "definition": "A work whose primary content is photographic images" },
+    { "tag": "Recipes", "slug": "recipes", "definition": "A collection of cooking or craft instructions organized around preparation" },
+    { "tag": "Reference", "slug": "reference", "definition": "A work designed for lookup rather than linear reading" },
+    { "tag": "Script / Play", "slug": "script-play", "definition": "Formatted as dramatic dialogue and stage directions; written for performance" },
+    { "tag": "Short Story", "slug": "short-story", "definition": "A brief prose narrative; typically under 7,500 words; often collected in anthologies" },
+    { "tag": "Textbook", "slug": "textbook", "definition": "A structured educational work designed for formal instruction in a subject" }
+  ]
+}

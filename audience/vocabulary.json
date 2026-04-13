@@ -1,0 +1,53 @@
+{
+  "type": "audience",
+  "label": "Audience",
+  "description": "The intended readership or age group for which the work is primarily designed.",
+  "controlled": true,
+  "tags": [
+    {
+      "tag": "Preschool",
+      "slug": "preschool",
+      "definition": "Designed for children aged 0–4; typically picture books, board books, or read-aloud material"
+    },
+    {
+      "tag": "Children",
+      "slug": "children",
+      "definition": "Designed for early and middle childhood readers, approximately ages 5–8; early chapter books and illustrated stories"
+    },
+    {
+      "tag": "Middle Grade",
+      "slug": "middle-grade",
+      "definition": "Designed for readers approximately ages 8–12; chapter books with more complex plots and themes"
+    },
+    {
+      "tag": "Young Adult",
+      "slug": "young-adult",
+      "definition": "Designed for readers approximately ages 13–18; may include mature themes while stopping short of adult content"
+    },
+    {
+      "tag": "Juvenile",
+      "slug": "juvenile",
+      "definition": "Broad catch-all for under-18 content when a more specific age tier is unavailable; maps to legacy OL 'Juvenile fiction' / 'Juvenile literature'"
+    },
+    {
+      "tag": "Adult",
+      "slug": "adult",
+      "definition": "Designed for general adult readership; no upper age restriction implied"
+    },
+    {
+      "tag": "Academic",
+      "slug": "academic",
+      "definition": "Designed for scholarly or research contexts; assumes significant background knowledge in the subject"
+    },
+    {
+      "tag": "Professional / Technical",
+      "slug": "professional-technical",
+      "definition": "Designed for practitioners in a specific field; assumes professional training or expertise"
+    },
+    {
+      "tag": "General / All Ages",
+      "slug": "general-all-ages",
+      "definition": "Intentionally accessible across age groups; not targeted at a specific demographic"
+    }
+  ]
+}

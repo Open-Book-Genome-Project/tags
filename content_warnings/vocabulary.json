@@ -1,0 +1,98 @@
+{
+  "type": "content_warnings",
+  "label": "Content Warnings",
+  "description": "Flags for content that may be distressing or inappropriate for certain readers, based on what the work depicts.",
+  "controlled": true,
+  "tags": [
+    {
+      "tag": "Abuse (emotional)",
+      "slug": "abuse-emotional",
+      "definition": "Sustained depiction of psychological or emotional abuse between characters"
+    },
+    {
+      "tag": "Abuse (physical)",
+      "slug": "abuse-physical",
+      "definition": "Sustained depiction of physical abuse, battery, or bodily harm between characters"
+    },
+    {
+      "tag": "Abuse (sexual)",
+      "slug": "abuse-sexual",
+      "definition": "Depiction of sexual abuse or molestation"
+    },
+    {
+      "tag": "Addiction / Substance use",
+      "slug": "addiction-substance-use",
+      "definition": "Depiction of addiction, substance dependency, or significant drug/alcohol misuse"
+    },
+    {
+      "tag": "Animal harm",
+      "slug": "animal-harm",
+      "definition": "Depiction of cruelty to, torture of, or graphic death of animals"
+    },
+    {
+      "tag": "Child death",
+      "slug": "child-death",
+      "definition": "Death of a child depicted on or near the page"
+    },
+    {
+      "tag": "Domestic violence",
+      "slug": "domestic-violence",
+      "definition": "Depiction of violence within intimate or family relationships"
+    },
+    {
+      "tag": "Eating disorders",
+      "slug": "eating-disorders",
+      "definition": "Depiction of disordered eating, anorexia, bulimia, or related conditions"
+    },
+    {
+      "tag": "Graphic violence",
+      "slug": "graphic-violence",
+      "definition": "Detailed, explicit depictions of physical violence, gore, or bodily harm"
+    },
+    {
+      "tag": "Homophobia / Transphobia",
+      "slug": "homophobia-transphobia",
+      "definition": "Significant depiction of anti-LGBTQ+ discrimination, slurs, or violence"
+    },
+    {
+      "tag": "Racism / Racial slurs",
+      "slug": "racism-racial-slurs",
+      "definition": "Significant depiction of racism, racial violence, or use of racial slurs"
+    },
+    {
+      "tag": "Self-harm",
+      "slug": "self-harm",
+      "definition": "Depiction of self-inflicted injury or self-destructive behavior"
+    },
+    {
+      "tag": "Sexual assault",
+      "slug": "sexual-assault",
+      "definition": "Depiction of rape or sexual assault"
+    },
+    {
+      "tag": "Sexual content (explicit)",
+      "slug": "sexual-content-explicit",
+      "definition": "Explicit, graphic sexual content"
+    },
+    {
+      "tag": "Slavery",
+      "slug": "slavery",
+      "definition": "Depiction of chattel slavery and its conditions"
+    },
+    {
+      "tag": "Suicide",
+      "slug": "suicide",
+      "definition": "Depiction of suicide or suicide attempts"
+    },
+    {
+      "tag": "Torture",
+      "slug": "torture",
+      "definition": "Depiction of deliberate infliction of severe pain or suffering"
+    },
+    {
+      "tag": "War violence",
+      "slug": "war-violence",
+      "definition": "Graphic depiction of combat, casualties, or atrocities of war"
+    }
+  ]
+}

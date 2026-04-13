@@ -1,0 +1,18 @@
+{
+  "type": "literary_form",
+  "label": "Literary Form",
+  "description": "The highest-level binary categorization: whether the work is presented as invented (Fiction) or as a factual account of reality (Nonfiction).",
+  "controlled": true,
+  "tags": [
+    {
+      "tag": "Fiction",
+      "slug": "fiction",
+      "definition": "The work is presented as invented; events and characters are not claimed to be real"
+    },
+    {
+      "tag": "Nonfiction",
+      "slug": "nonfiction",
+      "definition": "The work is presented as a factual account of reality"
+    }
+  ]
+}

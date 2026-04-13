@@ -1,0 +1,93 @@
+{
+  "type": "content_features",
+  "label": "Content Features",
+  "description": "Objective, verifiable structural or presentational features physically or formally present in the work.",
+  "controlled": false,
+  "tags": [
+    {
+      "tag": "Bibliography / References",
+      "slug": "bibliography-references",
+      "definition": "A list of sources cited or consulted by the author"
+    },
+    {
+      "tag": "Charts and graphs",
+      "slug": "charts-and-graphs",
+      "definition": "Data visualizations included as part of the work"
+    },
+    {
+      "tag": "Discussion questions",
+      "slug": "discussion-questions",
+      "definition": "A set of questions for group discussion, typically at the end of the work"
+    },
+    {
+      "tag": "Epistolary structure",
+      "slug": "epistolary-structure",
+      "definition": "Narrative constructed from letters, diary entries, documents, or other found records"
+    },
+    {
+      "tag": "Footnotes / Endnotes",
+      "slug": "footnotes-endnotes",
+      "definition": "Supplementary notes appearing at the bottom of pages or end of chapters/work"
+    },
+    {
+      "tag": "Frame narrative",
+      "slug": "frame-narrative",
+      "definition": "A story-within-a-story: an outer narrative that contains the central tale"
+    },
+    {
+      "tag": "Glossary",
+      "slug": "glossary",
+      "definition": "A defined list of specialized terms used in the work"
+    },
+    {
+      "tag": "Illustrations (black and white)",
+      "slug": "illustrations-bw",
+      "definition": "Black and white drawings, engravings, or artwork within the text"
+    },
+    {
+      "tag": "Illustrations (color)",
+      "slug": "illustrations-color",
+      "definition": "Full-color artwork, photographs, or plates within the text"
+    },
+    {
+      "tag": "Index",
+      "slug": "index",
+      "definition": "An alphabetical index of names, subjects, or concepts with page references"
+    },
+    {
+      "tag": "Maps",
+      "slug": "maps",
+      "definition": "Geographic or world maps included as part of the work"
+    },
+    {
+      "tag": "Multiple narrators",
+      "slug": "multiple-narrators",
+      "definition": "Two or more distinct first-person or close-third-person narrative voices"
+    },
+    {
+      "tag": "Non-linear chronology",
+      "slug": "non-linear-chronology",
+      "definition": "Chapters or sections are not arranged in chronological order"
+    },
+    {
+      "tag": "Problem sets / Exercises",
+      "slug": "problem-sets-exercises",
+      "definition": "Practice problems, exercises, or activities for the reader to complete"
+    },
+    {
+      "tag": "Second-person narration",
+      "slug": "second-person-narration",
+      "definition": "Narrated in the second person ('you do X')"
+    },
+    {
+      "tag": "Table of contents",
+      "slug": "table-of-contents",
+      "definition": "A structured listing of chapters or sections with page numbers"
+    },
+    {
+      "tag": "Verse / Poetic prose",
+      "slug": "verse-poetic-prose",
+      "definition": "Written in verse, or in prose with significant poetic/lyrical structure"
+    }
+  ]
+}

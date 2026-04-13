@@ -1,0 +1,113 @@
+{
+  "type": "genres",
+  "label": "Genres",
+  "description": "The stylistic vibe or market category the book belongs to; the emotional promise made to the reader.",
+  "controlled": true,
+  "tags": [
+    {
+      "tag": "Absurd",
+      "slug": "absurd",
+      "definition": "Works in which reason and logic are systematically undermined; the universe is indifferent or irrational"
+    },
+    {
+      "tag": "Action",
+      "slug": "action",
+      "definition": "Plot-driven works where physical conflict, speed, and kinetic energy are the primary draw"
+    },
+    {
+      "tag": "Adventure",
+      "slug": "adventure",
+      "definition": "Works centered on a journey, quest, or exploration into unfamiliar or dangerous territory"
+    },
+    {
+      "tag": "Comedy",
+      "slug": "comedy",
+      "definition": "Works whose primary intent is to amuse; structured around comic situations, misunderstandings, or wit"
+    },
+    {
+      "tag": "Crime",
+      "slug": "crime",
+      "definition": "Works in which criminal activity (planning, execution, or consequence) is the central subject"
+    },
+    {
+      "tag": "Drama",
+      "slug": "drama",
+      "definition": "Works that explore serious human situations and emotional conflict without a dominant genre framework"
+    },
+    {
+      "tag": "Erotica",
+      "slug": "erotica",
+      "definition": "Works in which explicit sexual content is a primary and intentional element"
+    },
+    {
+      "tag": "Fantasy",
+      "slug": "fantasy",
+      "definition": "Works set in worlds with magic, mythological creatures, or supernatural systems that operate by internal rules"
+    },
+    {
+      "tag": "Historical",
+      "slug": "historical",
+      "definition": "Works set substantially in a documented past era, where that era's conditions shape the story"
+    },
+    {
+      "tag": "Horror",
+      "slug": "horror",
+      "definition": "Works whose primary intent is to produce fear, dread, or revulsion in the reader"
+    },
+    {
+      "tag": "Humor",
+      "slug": "humor",
+      "definition": "Works that use comedy as a stylistic mode rather than a structural one; lighter than Comedy"
+    },
+    {
+      "tag": "LGBTQ+",
+      "slug": "lgbtq",
+      "definition": "Works in which queer identity, relationships, or experience is a central (not incidental) element"
+    },
+    {
+      "tag": "Literary",
+      "slug": "literary",
+      "definition": "Works where language, form, and prose style are foregrounded as primary artistic concerns"
+    },
+    {
+      "tag": "Mystery",
+      "slug": "mystery",
+      "definition": "Works structured around the retrospective discovery of the truth about a hidden event (typically a crime)"
+    },
+    {
+      "tag": "Mythology",
+      "slug": "mythology",
+      "definition": "Works drawing substantially from or retelling mythological traditions"
+    },
+    {
+      "tag": "Romance",
+      "slug": "romance",
+      "definition": "Works in which a central love relationship and its emotional development drives the plot"
+    },
+    {
+      "tag": "Satire",
+      "slug": "satire",
+      "definition": "Works that use irony, exaggeration, or ridicule to critique society, institutions, or human nature"
+    },
+    {
+      "tag": "Sci-Fi",
+      "slug": "sci-fi",
+      "definition": "Works that extrapolate from scientific or technological possibility into speculative scenarios"
+    },
+    {
+      "tag": "Thriller",
+      "slug": "thriller",
+      "definition": "Works structured around tension, urgency, and the forward-looking prevention of catastrophe"
+    },
+    {
+      "tag": "Tragedy",
+      "slug": "tragedy",
+      "definition": "Works in which the protagonist's downfall through flaw, circumstance, or fate is the central arc"
+    },
+    {
+      "tag": "Western",
+      "slug": "western",
+      "definition": "Works set in the American West (typically 19th century) and engaging its themes of frontier, law, and survival"
+    }
+  ]
+}
