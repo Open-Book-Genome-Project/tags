@@ -1,4 +1,4 @@
-"""Shared helpers for subject-based packs."""
+"""Shared helpers for subject-driven migration packs."""
 
 from __future__ import annotations
 
@@ -10,38 +10,26 @@ from rule_engine.base import RulePack
 from rules import RuleMatch
 
 
-class SubjectValueRule(Protocol):
-    def match(self, raw: str) -> RuleMatch | str | None: ...
+class SubjectMatchRule(Protocol):
+    def match(self, raw: str) -> RuleMatch | None: ...
 
 
-def _coerce_match(match: RuleMatch | str, default_action: str) -> RuleMatch:
-    if isinstance(match, RuleMatch):
-        return match
-    return RuleMatch(value=match, action=default_action)
-
-
-def classify_subject_value(
-    raw: str,
-    rules: Iterable[SubjectValueRule],
-    default_action: str,
-) -> RuleMatch | None:
+def first_match(raw: str, rules: Iterable[SubjectMatchRule]) -> RuleMatch | None:
     for rule in rules:
         match = rule.match(raw)
         if match is not None:
-            return _coerce_match(match, default_action)
+            return match
     return None
 
 
-def apply_subject_pack(
+def apply_subject_migration(
     state: RunState,
     output_type: str,
-    rules: Iterable[SubjectValueRule],
-    remove_matched_subjects: bool,
+    rules: Iterable[SubjectMatchRule],
 ) -> None:
-    default_action = "move" if remove_matched_subjects else "extract_only"
     next_subjects: list[str] = []
     for raw in state.remaining_subjects:
-        match = classify_subject_value(raw, rules, default_action=default_action)
+        match = first_match(raw, rules)
         if match is None:
             next_subjects.append(raw)
             continue
@@ -60,15 +48,15 @@ def apply_subject_pack(
     state.remaining_subjects = next_subjects
 
 
-class SubjectPack(RulePack):
-    """Small helper for packs that operate on the shared subject sequence."""
+class SubjectMigrationPack(RulePack):
+    """Base class for packs that migrate legacy subjects into structured tags."""
 
-    output_type = ""
+    output_type: str = ""
+    rules: Iterable[SubjectMatchRule]
 
     def apply(self, state: RunState) -> None:
-        apply_subject_pack(
+        apply_subject_migration(
             state,
             output_type=self.output_type,
             rules=self.rules,
-            remove_matched_subjects=self.remove_matched_subjects,
         )

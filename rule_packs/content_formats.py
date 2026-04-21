@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 
 from core.json_loader import load_mapping
-from rule_packs.utils import SubjectPack
+from rule_packs.subject_migration import SubjectMigrationPack
 from rules import MappingRule, PrefixRule
 
 MOVE = "move"
@@ -22,7 +22,7 @@ MOVE_TAGS = frozenset(
 )
 
 
-class ContentFormatsPack(SubjectPack):
+class ContentFormatsPack(SubjectMigrationPack):
     name = "content_formats"
     output_types = ("content_formats",)
     output_type = "content_formats"
@@ -37,7 +37,6 @@ class ContentFormatsPack(SubjectPack):
             MappingRule(move_mapping, default_action=MOVE),
             MappingRule(extract_only_mapping, default_action=EXTRACT_ONLY),
         )
-        self.remove_matched_subjects = False
 
     @classmethod
     def default(cls) -> "ContentFormatsPack":
