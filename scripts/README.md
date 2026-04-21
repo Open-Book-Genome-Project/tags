@@ -1,12 +1,22 @@
 # scripts
 
-Tools for migrating Open Library's legacy subject strings to canonical typed tags.
+Tools for running the current subject-migration dry runs.
 
 ---
 
 ## Overview
 
-Open Library works currently have a flat `subjects` list (plus `subject_people`, `subject_places`, `subject_times`) containing a mix of genres, themes, tropes, catalog codes, reading levels, and noise. These scripts help convert that legacy data into structured, typed canonical tags.
+The current migration scope is intentionally narrow:
+
+- `content_formats` is the only actively developed type-specific migration pack
+- `subject_diagnostics` is kept as a minimal QA/support pack
+
+The goal of the script is to run subject-driven migration proposals against Open Library work JSON and show:
+
+- which structured tags would be proposed
+- which legacy subjects would be removed
+- which legacy subjects would remain
+- which subjects matched with `move` vs `extract_only`
 
 ---
 
@@ -14,11 +24,11 @@ Open Library works currently have a flat `subjects` list (plus `subject_people`,
 
 ### `migrate_subjects.py`
 
-The main migration tool. Given a work's OL JSON, it:
+The current runner. Given a work's OL JSON, it:
 
 1. Loads the legacy `subjects`, `subject_people`, `subject_places`, and `subject_times` lists
-2. Applies rule-based and keyword matching to classify each string into the correct canonical type
-3. Outputs a structured tag object ready for import into the new schema
+2. Applies the currently enabled subject packs
+3. Outputs a proposal-style run report for review
 
 **Usage:**
 ```bash
@@ -33,65 +43,105 @@ python scripts/migrate_subjects.py --batch ol_ids.txt --output output/
 
 # Dry run (print proposed mappings without writing)
 python scripts/migrate_subjects.py --work OL82563W --dry-run
+
+# Run only content_formats
+python scripts/migrate_subjects.py --file work.json --pack content_formats --dry-run
+
+# Run content_formats plus diagnostics
+python scripts/migrate_subjects.py --file work.json --pack subject_mappings --dry-run
 ```
+
+Available packs:
+
+- `content_formats`
+- `subject_diagnostics`
+- `subject_mappings` (preset for both)
 
 **Output format:**
 ```json
 {
   "work_id": "OL82563W",
-  "literary_form": ["Fiction"],
-  "genres": ["Tragedy", "Gothic", "Romance"],
-  "subgenres": ["Psychological", "Historical"],
-  "content_formats": ["Novel"],
-  "moods": [],
-  "literary_themes": ["Love", "Revenge", "Death"],
-  "literary_tropes": ["Foundlings", "Love Triangles"],
-  "main_topics": ["Interpersonal relations", "Family life", "Class"],
-  "sub_topics": ["Country life", "Rural families", "Landscape"],
-  "people": ["Heathcliff", "Catherine Earnshaw"],
-  "places": ["Yorkshire", "England"],
-  "times": [],
-  "things": [],
-  "unmapped": ["Pr4172 .w7 2009c", "823/.8", "Zhang pian xiao shuo"]
+  "proposed_tags": {
+    "content_formats": ["Memoir", "Biography"],
+    "reading_level": ["Grade 4"],
+    "unmapped": ["abc"]
+  },
+  "subject_proposal": {
+    "original": ["Memoirs", "Biography", "abc", "Grade 4"],
+    "removed": ["Memoirs"],
+    "remaining": ["Biography", "abc", "Grade 4"]
+  },
+  "subject_matches": [
+    {
+      "subject": "Memoirs",
+      "output_type": "content_formats",
+      "value": "Memoir",
+      "action": "move"
+    },
+    {
+      "subject": "Biography",
+      "output_type": "content_formats",
+      "value": "Biography",
+      "action": "extract_only"
+    }
+  ]
 }
 ```
 
-The `unmapped` field collects strings that couldn't be classified — these are candidates for manual review or the `other` / droppable bucket.
+This report is meant for dry-run review and QA, not as a final persisted work format.
 
 ---
+
+### Architecture
+
+The current implementation is intentionally small and only supports the present migration scope:
+
+```text
+core/
+  json_loader.py         # JSON resource loading
+  run_state.py           # shared run/proposal state
+  subject_classifier.py  # work-level orchestration + report output
+rule_engine/
+  base.py                # RulePack interface
+  normalization.py       # shared text normalization helpers
+rules/
+  match_result.py        # structured value + action matches
+  mapping_rule.py        # normalized mapping matches
+  prefix_rule.py         # prefix-based matches
+rule_packs/
+  content_formats.py     # current migration logic under active development
+  subject_diagnostics.py # minimal QA/support pack
+  utils.py               # shared subject-pack execution helper
+```
+
+`scripts/migrate_subjects.py` remains the operational entry point and keeps the pack selection local to the script.
 
 ### Adding Mapping Rules
 
-Mappings live in `scripts/mappings/`. Each file covers one tag type:
+Mappings live in `resources/mappings/`.
 
 ```
-scripts/
+resources/
   mappings/
-    genres.json          # legacy string → canonical genre
-    subgenres.json        # legacy string → canonical subgenre
     content_formats.json  # legacy string → canonical format
-    literary_themes.json  # legacy string → canonical theme
-    literary_tropes.json  # legacy string → canonical trope
     droppable.json        # strings to discard (reading levels, codes, etc.)
-    people_overrides.json # OL people string → canonical name
-    places_overrides.json # OL place string → canonical place
 ```
 
-Each mapping file is a JSON object where keys are legacy strings (lowercase, stripped) and values are the canonical tag:
+`content_formats.json` is a JSON object where keys are legacy subject strings and values are canonical content format tags:
 
 ```json
 {
-  "historical fiction": "Historical",
-  "fiction, historical": "Historical",
-  "psychological fiction": "Psychological",
-  "gothic fiction": "Gothic",
-  "english gothic fiction": "Gothic"
+  "memoirs": "Memoir",
+  "biography": "Biography",
+  "letters": "Letters",
+  "novels": "Novel"
 }
 ```
 
-To add a new mapping: edit the appropriate file and open a PR. No code changes needed for new string mappings.
+`ContentFormatsPack` then splits those mappings into:
 
----
+- `move` cases for currently clean first-pass formats
+- `extract_only` cases for overlapping or not-yet-approved removals
 
 ## Development
 
@@ -107,5 +157,3 @@ Requirements: `requests`, `tqdm` (for batch progress)
 ## Data Sources
 
 - OL Work JSON: `https://openlibrary.org/works/{OL_ID}.json`
-- OL Search API: `https://openlibrary.org/search.json`
-- Tag objects: `https://openlibrary.org/tags/{TAG_ID}.json`
