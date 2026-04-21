@@ -7,7 +7,7 @@ from pathlib import Path
 
 from rule_engine.normalization import normalize
 from rule_packs.utils import SubjectPack
-from rules import MappingRule, PrefixRule
+from rules import LCSHSuffixRule, MappingRule, PrefixRule
 
 MAPPINGS_DIR = Path(__file__).parent.parent / "resources" / "mappings"
 
@@ -26,28 +26,6 @@ STRONG_NONFICTION_SIGNALS = {
     "memoirs",
     "juvenile nonfiction",
 }
-
-
-class LCSHSuffixRule:
-    """Extract genre signals from LCSH '--' suffix patterns.
-
-    Handles subject strings like 'Pirates--Fiction' or 'History--Biography'
-    by splitting on '--' and matching the suffix against the literary_form
-    mapping table.
-
-    Confidence: 0.98 (high precision, structured LCSH pattern).
-    """
-
-    def __init__(self, mapping: dict[str, str]) -> None:
-        self.mapping = mapping
-
-    def match(self, raw: str) -> str | None:
-        key = normalize(raw)
-        if "--" not in key:
-            return None
-        suffix = key.split("--")[-1].strip()
-        return self.mapping.get(suffix)
-
 
 class DroppableRule:
     """Drop known noise strings - import artifacts, access markers, etc.
