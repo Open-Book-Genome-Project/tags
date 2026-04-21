@@ -17,19 +17,54 @@ import json
 import os
 import sys
 from pathlib import Path
+from typing import Callable
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from core.classifier_assembler import build_subject_classifier
-from core.pack_registry import AVAILABLE_PACK_NAMES
+from core.subject_classifier import SubjectClassifier
+from rule_packs.content_formats import ContentFormatsPack
+from rule_packs.subject_diagnostics import SubjectDiagnosticsPack
 
 # ---------------------------------------------------------------------------
 # Paths
 # ---------------------------------------------------------------------------
 
 OL_WORK_URL = "https://openlibrary.org/works/{work_id}.json"
+
+PackFactory = Callable[[], object]
+PACK_PRESETS: dict[str, tuple[str, ...]] = {
+    "subject_mappings": ("content_formats", "subject_diagnostics"),
+}
+PACK_FACTORIES: dict[str, PackFactory] = {
+    "content_formats": ContentFormatsPack.default,
+    "subject_diagnostics": SubjectDiagnosticsPack.default,
+}
+AVAILABLE_PACK_NAMES = tuple(sorted({*PACK_FACTORIES, *PACK_PRESETS}))
+
+
+def resolve_pack_names(enabled_packs: list[str] | None) -> list[str]:
+    selected = list(enabled_packs or [])
+    expanded: list[str] = []
+    for name in selected:
+        if name in PACK_PRESETS:
+            expanded.extend(PACK_PRESETS[name])
+            continue
+        expanded.append(name)
+    return expanded
+
+
+def build_subject_classifier(enabled_packs: list[str] | None = None) -> SubjectClassifier:
+    selected = resolve_pack_names(enabled_packs)
+    missing = [name for name in selected if name not in PACK_FACTORIES]
+    if missing:
+        available = ", ".join(AVAILABLE_PACK_NAMES)
+        missing_display = ", ".join(sorted(missing))
+        raise ValueError(
+            f"Unknown rule pack(s): {missing_display}. Available: {available}"
+        )
+    return SubjectClassifier(rule_packs=[PACK_FACTORIES[name]() for name in selected])
 
 
 # ---------------------------------------------------------------------------
