@@ -14,3 +14,7 @@ class MoodsPack(SubjectPack):
     def __init__(self, remove_matched_subjects: bool = True) -> None:
         self.rules = (PrefixRule("mood"),)
         self.remove_matched_subjects = remove_matched_subjects
+
+    @classmethod
+    def default(cls) -> "MoodsPack":
+        return cls(remove_matched_subjects=True)

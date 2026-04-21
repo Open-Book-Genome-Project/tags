@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from typing import Callable
 
-from core.json_loader import load_mapping, load_set
 from rule_packs import (
     AudiencePack,
     ContentFormatsPack,
@@ -44,42 +43,19 @@ PACK_PRESETS: dict[str, tuple[str, ...]] = {
 }
 
 PACK_FACTORIES: dict[str, PackFactory] = {
-    "literary_form": lambda: LiteraryFormPack(remove_matched_subjects=True),
-    "audience": lambda: AudiencePack(
-        mapping=load_mapping("audience"),
-        remove_matched_subjects=True,
-    ),
-    "genres": lambda: GenresPack(
-        mapping=load_mapping("genres"),
-        remove_matched_subjects=True,
-    ),
-    "subgenres": lambda: SubgenresPack(
-        mapping=load_mapping("subgenres"),
-        remove_matched_subjects=True,
-    ),
-    "content_formats": lambda: ContentFormatsPack(
-        mapping=load_mapping("content_formats"),
-        remove_matched_subjects=True,
-    ),
-    "moods": lambda: MoodsPack(remove_matched_subjects=True),
-    "literary_themes": lambda: LiteraryThemesPack(
-        mapping=load_mapping("literary_themes"),
-        remove_matched_subjects=True,
-    ),
-    "literary_tropes": lambda: LiteraryTropesPack(
-        mapping=load_mapping("literary_tropes"),
-        remove_matched_subjects=True,
-    ),
-    "main_topics": lambda: MainTopicsPack(
-        mapping=load_mapping("main_topics"),
-        remove_matched_subjects=True,
-    ),
-    "subject_diagnostics": lambda: SubjectDiagnosticsPack(
-        droppable=load_set("droppable")
-    ),
-    "people": lambda: PeoplePack(overrides=load_mapping("people_overrides")),
-    "places": lambda: PlacesPack(overrides=load_mapping("places_overrides")),
-    "times": TimesPack,
+    "literary_form": LiteraryFormPack.default,
+    "audience": AudiencePack.default,
+    "genres": GenresPack.default,
+    "subgenres": SubgenresPack.default,
+    "content_formats": ContentFormatsPack.default,
+    "moods": MoodsPack.default,
+    "literary_themes": LiteraryThemesPack.default,
+    "literary_tropes": LiteraryTropesPack.default,
+    "main_topics": MainTopicsPack.default,
+    "subject_diagnostics": SubjectDiagnosticsPack.default,
+    "people": PeoplePack.default,
+    "places": PlacesPack.default,
+    "times": TimesPack.default,
 }
 
 AVAILABLE_PACK_NAMES = tuple(sorted({*PACK_FACTORIES, *PACK_PRESETS}))

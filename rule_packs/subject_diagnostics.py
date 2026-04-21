@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from core.json_loader import load_set
 from core.run_state import RunState
 from rule_engine.base import RulePack
 from rule_engine.normalization import (
@@ -39,3 +40,7 @@ class SubjectDiagnosticsPack(RulePack):
             value = raw.strip()
             if value:
                 state.add("unmapped", value)
+
+    @classmethod
+    def default(cls) -> "SubjectDiagnosticsPack":
+        return cls(droppable=load_set("droppable"))

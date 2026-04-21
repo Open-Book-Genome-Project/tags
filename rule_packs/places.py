@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 
+from core.json_loader import load_mapping
 from core.run_state import RunState
 from rule_engine.base import RulePack
 from rules import OverrideRule
@@ -21,3 +22,7 @@ class PlacesPack(RulePack):
             value = self.rule.apply(raw)
             if value is not None:
                 state.add("places", value)
+
+    @classmethod
+    def default(cls) -> "PlacesPack":
+        return cls(overrides=load_mapping("places_overrides"))

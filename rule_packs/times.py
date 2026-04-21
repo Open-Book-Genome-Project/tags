@@ -19,3 +19,7 @@ class TimesPack(RulePack):
             value = self.rule.apply(raw)
             if value is not None:
                 state.add("times", value)
+
+    @classmethod
+    def default(cls) -> "TimesPack":
+        return cls()
