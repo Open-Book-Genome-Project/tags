@@ -33,6 +33,13 @@ def classify_subject_values(
             next_subjects.append(raw)
             continue
         state.add(output_type, match)
+        state.record_subject_match(
+            raw=raw,
+            output_type=output_type,
+            value=match,
+            action="move",
+        )
+        state.record_removed_subject(raw)
     state.remaining_subjects = next_subjects
 
 
@@ -49,6 +56,12 @@ def apply_subject_pack(
         match = classify_subject_value(raw, rules)
         if match is not None:
             state.add(output_type, match)
+            state.record_subject_match(
+                raw=raw,
+                output_type=output_type,
+                value=match,
+                action="extract_only",
+            )
 
 
 class SubjectPack(RulePack):

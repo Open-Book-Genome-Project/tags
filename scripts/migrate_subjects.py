@@ -61,20 +61,38 @@ def load_work_file(path: str) -> dict:
 # ---------------------------------------------------------------------------
 
 
-def print_result(work_id: str, result: dict):
+def print_report(work_id: str, report: dict):
     print(f"\n=== {work_id} ===")
-    for key, values in result.items():
+    print("  proposed_tags:")
+    for key, values in report["proposed_tags"].items():
         if values:
-            print(f"  {key}:")
+            print(f"    {key}:")
             for v in values:
-                print(f"    - {v}")
+                print(f"      - {v}")
+
+    subject_proposal = report["subject_proposal"]
+    print("  subject_proposal:")
+    for key in ("removed", "remaining"):
+        values = subject_proposal[key]
+        print(f"    {key}:")
+        for value in values:
+            print(f"      - {value}")
+
+    if report["subject_matches"]:
+        print("  subject_matches:")
+        for match in report["subject_matches"]:
+            print(
+                "    - "
+                f"{match['subject']} -> {match['output_type']}:{match['value']} "
+                f"({match['action']})"
+            )
 
 
-def write_result(work_id: str, result: dict, output_dir: str):
+def write_report(work_id: str, report: dict, output_dir: str):
     os.makedirs(output_dir, exist_ok=True)
     out_path = Path(output_dir) / f"{work_id}.json"
     with open(out_path, "w") as f:
-        json.dump({"work_id": work_id, **result}, f, indent=2)
+        json.dump({"work_id": work_id, **report}, f, indent=2)
     print(f"Written: {out_path}")
 
 
@@ -111,20 +129,20 @@ def main():
     if args.work:
         print(f"Fetching {args.work}...")
         work = fetch_work(args.work)
-        result = classifier.classify_work(work)
+        report = classifier.classify_work_report(work)
         if args.dry_run:
-            print_result(args.work, result)
+            print_report(args.work, report)
         else:
-            write_result(args.work, result, args.output)
+            write_report(args.work, report, args.output)
 
     elif args.file:
         work = load_work_file(args.file)
         work_id = work.get("key", Path(args.file).stem).split("/")[-1]
-        result = classifier.classify_work(work)
+        report = classifier.classify_work_report(work)
         if args.dry_run:
-            print_result(work_id, result)
+            print_report(work_id, report)
         else:
-            write_result(work_id, result, args.output)
+            write_report(work_id, report, args.output)
 
     elif args.batch:
         with open(args.batch) as f:
@@ -134,11 +152,11 @@ def main():
             try:
                 print(f"Processing {work_id}...")
                 work = fetch_work(work_id)
-                result = classifier.classify_work(work)
+                report = classifier.classify_work_report(work)
                 if args.dry_run:
-                    print_result(work_id, result)
+                    print_report(work_id, report)
                 else:
-                    write_result(work_id, result, args.output)
+                    write_report(work_id, report, args.output)
             except Exception as e:
                 print(f"ERROR processing {work_id}: {e}", file=sys.stderr)
 

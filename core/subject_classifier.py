@@ -40,12 +40,26 @@ class SubjectClassifier:
         self.output_types = tuple(output_types or DEFAULT_OUTPUT_TYPES)
 
     def classify_work(self, work: Mapping[str, Any]) -> dict[str, list[str]]:
+        """Return only the proposed tags for compatibility callers."""
+        return self.classify_work_report(work)["proposed_tags"]
+
+    def classify_work_report(self, work: Mapping[str, Any]) -> dict[str, Any]:
         """Run the enabled rule packs against a normalized work object."""
+        original_subjects = list(work.get("subjects", []))
         state = RunState(
             work=work,
             result={tag_type: [] for tag_type in self.output_types},
-            remaining_subjects=list(work.get("subjects", [])),
+            original_subjects=original_subjects,
+            remaining_subjects=list(original_subjects),
         )
         for pack in self.rule_packs:
             pack.apply(state)
-        return state.result
+        return {
+            "proposed_tags": state.result,
+            "subject_proposal": {
+                "original": state.original_subjects,
+                "removed": state.removed_subjects,
+                "remaining": state.remaining_subjects,
+            },
+            "subject_matches": state.subject_matches,
+        }
