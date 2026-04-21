@@ -2,14 +2,17 @@
 
 from __future__ import annotations
 
+from rules.match_result import RuleMatch
+
 
 class PrefixRule:
     """Match values like ``theme:love`` and return the normalized payload."""
 
-    def __init__(self, prefix: str) -> None:
+    def __init__(self, prefix: str, action: str = "move") -> None:
         self.prefix = prefix
+        self.action = action
 
-    def match(self, raw: str) -> str | None:
+    def match(self, raw: str) -> RuleMatch | None:
         if not self.prefix or ":" not in raw:
             return None
         prefix, _, value = raw.partition(":")
@@ -18,4 +21,4 @@ class PrefixRule:
         cleaned = value.strip()
         if not cleaned:
             return None
-        return cleaned.title()
+        return RuleMatch(value=cleaned.title(), action=self.action)

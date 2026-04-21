@@ -24,6 +24,8 @@ class SubjectDiagnosticsPack(RulePack):
             key = normalize(raw)
             if key in self.droppable:
                 continue
+            if key in state.retained_matched_subjects:
+                continue
 
             if is_reading_level(raw):
                 value = raw.strip()
