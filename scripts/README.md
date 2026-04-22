@@ -20,6 +20,12 @@ The main migration tool. Given a work's OL JSON, it:
 2. Applies rule-based and keyword matching to classify each string into the correct canonical type
 3. Outputs a structured tag object ready for import into the new schema
 
+The CLI remains the entry point, but some of the internal logic is now organized into smaller modules:
+
+- `core/json_loader.py` for loading mapping JSON
+- `rule_engine/normalization.py` for normalization and reading-level / classification detection
+- `core/subject_classifier.py` for the reusable work-level classifier
+
 **Usage:**
 ```bash
 # Single work by OL ID
