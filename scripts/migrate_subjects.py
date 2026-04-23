@@ -20,13 +20,16 @@ from pathlib import Path
 
 import requests
 
-from core.subject_classifier import SubjectClassifier
-
 # ---------------------------------------------------------------------------
 # Paths
 # ---------------------------------------------------------------------------
 
 REPO_ROOT = Path(__file__).parent.parent
+
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from subject_classifier import SubjectClassifier
 
 OL_WORK_URL = "https://openlibrary.org/works/{work_id}.json"
 
@@ -34,6 +37,7 @@ OL_WORK_URL = "https://openlibrary.org/works/{work_id}.json"
 # ---------------------------------------------------------------------------
 # Fetching
 # ---------------------------------------------------------------------------
+
 
 def fetch_work(work_id: str) -> dict:
     """Fetch a work JSON from Open Library."""
@@ -56,6 +60,7 @@ def load_work_file(path: str) -> dict:
 # Output
 # ---------------------------------------------------------------------------
 
+
 def print_result(work_id: str, result: dict):
     print(f"\n=== {work_id} ===")
     for key, values in result.items():
@@ -77,6 +82,7 @@ def write_result(work_id: str, result: dict, output_dir: str):
 # CLI
 # ---------------------------------------------------------------------------
 
+
 def main():
     parser = argparse.ArgumentParser(
         description="Migrate OL legacy subjects to canonical typed tags."
@@ -86,8 +92,12 @@ def main():
     group.add_argument("--file", help="Path to a local work JSON file")
     group.add_argument("--batch", help="Path to newline-delimited OL Work IDs file")
 
-    parser.add_argument("--output", default="output", help="Output directory for batch mode")
-    parser.add_argument("--dry-run", action="store_true", help="Print results, don't write files")
+    parser.add_argument(
+        "--output", default="output", help="Output directory for batch mode"
+    )
+    parser.add_argument(
+        "--dry-run", action="store_true", help="Print results, don't write files"
+    )
 
     args = parser.parse_args()
     classifier = SubjectClassifier()

@@ -1,9 +1,10 @@
-"""Reusable classification core for subject migration."""
+"""Reusable work-level subject classifier."""
 
 from __future__ import annotations
 
-from core.json_loader import load_mapping, load_set
-from rule_engine.normalization import (
+from .json_loader import load_mapping, load_set
+from .models import ClassificationResult
+from .normalization import (
     is_classification_code,
     is_reading_level,
     normalize,
@@ -81,9 +82,9 @@ class SubjectClassifier:
 
         return ("unmapped", raw.strip())
 
-    def classify_work(self, work: dict) -> dict:
+    def classify_work(self, work: dict) -> ClassificationResult:
         """Given a work JSON dict, produce a structured tag output."""
-        result: dict[str, list] = {
+        result: ClassificationResult = {
             "literary_form": [],
             "audience": [],
             "genres": [],
