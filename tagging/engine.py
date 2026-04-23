@@ -11,7 +11,7 @@ from .normalization import (
 )
 
 
-class SubjectClassifier:
+class TypedTagger:
     """Classify legacy Open Library subjects into typed tags."""
 
     def __init__(self) -> None:

@@ -20,13 +20,13 @@ The main migration tool. Given a work's OL JSON, it:
 2. Applies rule-based and keyword matching to classify each string into the correct canonical type
 3. Outputs a structured tag object ready for import into the new schema
 
-The CLI remains the entry point, but the reusable classifier now lives in a package-style layout:
+The CLI remains the entry point, but the reusable tagging logic now lives in a package-style layout:
 
-- `subject_classifier/__init__.py` for the public re-export surface
-- `subject_classifier/classifier.py` for the `SubjectClassifier` implementation
-- `subject_classifier/normalization.py` for pure normalization helpers
-- `subject_classifier/mapping_loader.py` for mapping JSON I/O
-- `subject_classifier/models.py` for typed result structures
+- `tagging/__init__.py` for the public re-export surface
+- `tagging/engine.py` for the `TypedTagger` implementation
+- `tagging/normalization.py` for pure normalization and classification helpers
+- `tagging/json_loader.py` for mapping JSON I/O
+- `tagging/models.py` for typed result structures
 
 **Usage:**
 ```bash

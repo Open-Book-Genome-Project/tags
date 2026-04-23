@@ -29,7 +29,7 @@ REPO_ROOT = Path(__file__).parent.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from subject_classifier import SubjectClassifier
+from tagging import TypedTagger
 
 OL_WORK_URL = "https://openlibrary.org/works/{work_id}.json"
 
@@ -100,7 +100,7 @@ def main():
     )
 
     args = parser.parse_args()
-    classifier = SubjectClassifier()
+    classifier = TypedTagger()
 
     if args.work:
         print(f"Fetching {args.work}...")
