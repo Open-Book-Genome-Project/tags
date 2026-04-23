@@ -70,19 +70,20 @@ The `unmapped` field collects strings that couldn't be classified — these are 
 
 ### Adding Mapping Rules
 
-Mappings live in `scripts/mappings/`. Each file covers one tag type:
+Mappings live in `tagging/resources/mappings/`. Each file covers one tag type:
 
 ```
-scripts/
-  mappings/
-    genres.json          # legacy string → canonical genre
-    subgenres.json        # legacy string → canonical subgenre
-    content_formats.json  # legacy string → canonical format
-    literary_themes.json  # legacy string → canonical theme
-    literary_tropes.json  # legacy string → canonical trope
-    droppable.json        # strings to discard (reading levels, codes, etc.)
-    people_overrides.json # OL people string → canonical name
-    places_overrides.json # OL place string → canonical place
+tagging/
+  resources/
+    mappings/
+      genres.json           # legacy string → canonical genre
+      subgenres.json         # legacy string → canonical subgenre
+      content_formats.json   # legacy string → canonical format
+      literary_themes.json   # legacy string → canonical theme
+      literary_tropes.json   # legacy string → canonical trope
+      droppable.json         # strings to discard (reading levels, codes, etc.)
+      people_overrides.json  # OL people string → canonical name
+      places_overrides.json  # OL place string → canonical place
 ```
 
 Each mapping file is a JSON object where keys are legacy strings (lowercase, stripped) and values are the canonical tag:

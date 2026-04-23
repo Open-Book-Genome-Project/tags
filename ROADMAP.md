@@ -59,7 +59,7 @@ Wire the taxonomy and API into the OL editing and search stack.
 
 Programmatic tagging of OL works at scale using the Open Book Genome Project sequencer.
 
-- [ ] Build reliable mapping from OL free-form subjects → canonical typed tags (expanding `scripts/mappings/`)
+- [ ] Build reliable mapping from OL free-form subjects → canonical typed tags (expanding `tagging/resources/mappings/`)
 - [ ] Batch migration pipeline: apply genre/mood/etc. tags to high-demand works
 - [ ] NLP-based tag extraction from full text (via OBGP Sequencer)
   - Named Entity Recognition → `people`, `places`, `things`

@@ -1,4 +1,4 @@
-"""JSON resource loaders for migration mappings."""
+"""JSON resource loaders for tagging mappings."""
 
 from __future__ import annotations
 
@@ -7,12 +7,11 @@ from pathlib import Path
 
 from .normalization import normalize
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
-MAPPINGS_DIR = REPO_ROOT / "scripts" / "mappings"
+MAPPINGS_DIR = Path(__file__).resolve().parent / "resources" / "mappings"
 
 
 def load_mapping(name: str) -> dict[str, str]:
-    """Load a JSON mapping file from scripts/mappings/."""
+    """Load a JSON mapping file from tagging/resources/mappings/."""
     path = MAPPINGS_DIR / f"{name}.json"
     if not path.exists():
         return {}
