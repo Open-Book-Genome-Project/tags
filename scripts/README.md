@@ -20,6 +20,14 @@ The main migration tool. Given a work's OL JSON, it:
 2. Applies rule-based and keyword matching to classify each string into the correct canonical type
 3. Outputs a structured tag object ready for import into the new schema
 
+The CLI remains the entry point, but the reusable tagging logic now lives in a package-style layout:
+
+- `tagging/__init__.py` for the public re-export surface
+- `tagging/engine.py` for the `TypedTagger` implementation
+- `tagging/normalization.py` for pure normalization and classification helpers
+- `tagging/json_loader.py` for mapping JSON I/O
+- `tagging/models.py` for typed result structures
+
 **Usage:**
 ```bash
 # Single work by OL ID
@@ -62,19 +70,20 @@ The `unmapped` field collects strings that couldn't be classified — these are 
 
 ### Adding Mapping Rules
 
-Mappings live in `scripts/mappings/`. Each file covers one tag type:
+Mappings live in `tagging/resources/mappings/`. Each file covers one tag type:
 
 ```
-scripts/
-  mappings/
-    genres.json          # legacy string → canonical genre
-    subgenres.json        # legacy string → canonical subgenre
-    content_formats.json  # legacy string → canonical format
-    literary_themes.json  # legacy string → canonical theme
-    literary_tropes.json  # legacy string → canonical trope
-    droppable.json        # strings to discard (reading levels, codes, etc.)
-    people_overrides.json # OL people string → canonical name
-    places_overrides.json # OL place string → canonical place
+tagging/
+  resources/
+    mappings/
+      genres.json           # legacy string → canonical genre
+      subgenres.json         # legacy string → canonical subgenre
+      content_formats.json   # legacy string → canonical format
+      literary_themes.json   # legacy string → canonical theme
+      literary_tropes.json   # legacy string → canonical trope
+      droppable.json         # strings to discard (reading levels, codes, etc.)
+      people_overrides.json  # OL people string → canonical name
+      places_overrides.json  # OL place string → canonical place
 ```
 
 Each mapping file is a JSON object where keys are legacy strings (lowercase, stripped) and values are the canonical tag:
