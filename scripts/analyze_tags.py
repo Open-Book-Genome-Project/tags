@@ -24,7 +24,7 @@ from pathlib import Path
 
 SCRIPTS_DIR = Path(__file__).parent
 REPO_ROOT = SCRIPTS_DIR.parent
-MAPPINGS_DIR = SCRIPTS_DIR / "mappings"
+MAPPINGS_DIR = REPO_ROOT / "mappings"
 
 
 # ---------------------------------------------------------------------------
