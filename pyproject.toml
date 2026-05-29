@@ -1,0 +1,8 @@
+[project]
+name = "ol-tags"
+version = "0.1.0"
+description = "Canonical tags for Open Library"
+required-python = ">=3.10"
+
+[project.scripts]
+tags = "tags.cli:main"
