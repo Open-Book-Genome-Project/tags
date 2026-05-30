@@ -57,6 +57,7 @@ def load_all(root: Optional[Path] = None) -> list[TagType]:
         out.append(TagType(
             name=name,
             directory=d,
+            priority=cfg.get("priority", 100),
             vocabulary=vocab,
             mappings=maps,
             classify_fn=fn,
