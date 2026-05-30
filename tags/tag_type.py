@@ -21,6 +21,7 @@ class TagType:
 
     name: str
     directory: Path
+    priority: int = 100
     vocabulary: dict = field(default_factory=dict)
     mappings: dict = field(default_factory=dict)
     classify_fn: Optional[Classifier] = None
