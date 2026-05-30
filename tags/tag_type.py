@@ -4,7 +4,7 @@ tag_type.py
 Defines the TagType dataclass - the core data structure that represents
 a single tag type (genres, subgenres, moods, etc) and its classification logic.
 
-It's like a blueprint or template that says "Every tag type should have thses pieces of information".
+It's like a blueprint or template that says "Every tag type should have these pieces of information".
 """
 
 from dataclasses import dataclass, field
