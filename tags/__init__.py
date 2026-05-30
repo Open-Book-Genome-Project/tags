@@ -45,21 +45,13 @@ def load_all(root: Optional[Path] = None) -> list[TagType]:
         # Mappings: mappings/<type>.json
         maps_path = REPO_ROOT / "mappings" / f"{name}.json"
         if maps_path.exists():
-<<<<<<< HEAD
             raw_maps = json.loads(maps_path.read_text())
             maps = {normalize(k): v for k, v in raw_maps.items()}
-=======
-            maps = json.loads(maps_path.read_text())
->>>>>>> 698d943 (feat: add tag type registry and load_all() function)
         else:
             maps = {}
 
         # Optional custom classify function
-<<<<<<< HEAD
         fn = None
-=======
-        fn: Optional[Classifier] = None
->>>>>>> 698d943 (feat: add tag type registry and load_all() function)
         if (d / "classify.py").exists():
             mod = importlib.import_module(f"tag_types.{name}.classify")
             fn = getattr(mod, "classify", None)
@@ -67,10 +59,7 @@ def load_all(root: Optional[Path] = None) -> list[TagType]:
         out.append(TagType(
             name=name,
             directory=d,
-<<<<<<< HEAD
             priority=cfg.get("priority", 100),
-=======
->>>>>>> 698d943 (feat: add tag type registry and load_all() function)
             vocabulary=vocab,
             mappings=maps,
             classify_fn=fn,
