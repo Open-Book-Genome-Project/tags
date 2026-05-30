@@ -1,0 +1,18 @@
+{
+  "genres": {"priority": 5},
+  "subgenres": {"priority": 10},
+  "moods": {"priority": 15},
+  "audience": {"priority": 20},
+  "content_formats": {"priority": 25},
+  "content_features": {"priority": 30},
+  "content_warnings": {"priority": 35},
+  "literary_form": {"priority": 40},
+  "literary_themes": {},
+  "literary_tropes": {},
+  "main_topics": {},
+  "sub_topics": {},
+  "people": {},
+  "places": {},
+  "things": {},
+  "times": {}
+}
