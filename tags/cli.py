@@ -91,6 +91,7 @@ def cmd_analyze(args: argparse.Namespace) -> None:
                 for m in matches:
                     tag_counts[m.value] += 1
 
+<<<<<<< HEAD
     # Calculate coverage percentages
     pct_subjects = (with_tag / with_subjects * 100) if with_subjects else 0
     pct_total = (with_tag / total * 100) if total else 0
