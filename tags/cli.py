@@ -22,6 +22,7 @@ from tags.classify import normalize
 #-----------------------------------------------------------------------------
 # Build lookup
 #-----------------------------------------------------------------------------
+
 def build_lookup(tt: TagType) -> dict[str, str]:
     """
     Build a flat subject -> slug from a TagType's vocabulary and mappings.
