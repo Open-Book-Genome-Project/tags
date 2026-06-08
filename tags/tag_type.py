@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Optional
 
-# A Clasiier function recieves a subject string and the TagType instance,
+# A Classifier function receives a subject string and the TagType instance,
 # and returns a canonical slug if matched, or None to fall through to default.
 Classifier = Callable[[str, "TagType"], Optional[str]]
 

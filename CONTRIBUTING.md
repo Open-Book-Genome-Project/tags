@@ -146,15 +146,15 @@ These rules govern how subject strings and mapping files are handled across all 
 ### 1. Normalization
 
 All subject strings and mapping keys are normalized before matching:
-- **Lowercase** - `"Science Fiction"` and `"science fiction"` macth identically
+- **Lowercase** - `"Science Fiction"` and `"science fiction"` match identically
 - **Whitespace-stripped** - leading/trailing spaces removed
-- **NFC-normalized** - Uinicode characters are in Canonical Composition form (e.g., `é` as a single character, not `e` + combining accent)
+- **NFC-normalized** - Unicode characters are in Canonical Composition form (e.g., `é` as a single character, not `e` + combining accent)
 
 Normalization is applied both when writing mapping files and at classification time.
 
 ### 2. Slug-Based Mapping values
 
-Mapping values in `mapppings.json` reference **slugs** (stable identifiers), not display names. This decouples the mapping dictionary from display-layer changes.
+Mapping values in `mappings.json` reference **slugs** (stable identifiers), not display names. This decouples the mapping dictionary from display-layer changes.
 
 **Correct:**
 ```json
