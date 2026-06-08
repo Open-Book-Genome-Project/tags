@@ -16,36 +16,7 @@ from collections import defaultdict
 from pathlib import Path
 
 from tags import load_all
-from tags.tag_type import TagType
 from tags.classify import normalize
-
-#-----------------------------------------------------------------------------
-# Build lookup
-#-----------------------------------------------------------------------------
-
-def build_lookup(tt: TagType) -> dict[str, str]:
-    """
-    Build a flat subject -> slug from a TagType's vocabulary and mappings.
-
-    Sources (later wins):
-        1. vocabulary.json - slug and tag name as direct match terms
-        2. mappings/<type>.json - curated alias mappings
-    """
-    lookup: dict[str, str] = {}
-
-    # From vocabulary: slug -> slug, tag name -> slug
-    for entry in tt.vocabulary.get("tags", []):
-        slug = entry.get("slug", "")
-        lookup[normalize(slug)] = slug
-        lookup[normalize(entry.get("tag", ""))] = slug
-        for alias in entry.get("aliases", []):
-            lookup[normalize(alias)] = slug
-
-    # From mappings: subject string -> slug
-    for subject, slug in tt.mappings.items():
-        lookup[normalize(subject)] = slug
-
-    return lookup
 
 #-----------------------------------------------------------------------------
 # Analyze - coverage scan
@@ -65,7 +36,7 @@ def cmd_analyze(args: argparse.Namespace) -> None:
     tt = matches[0]
     
     # Build lookup and report
-    lookup = build_lookup(tt)
+    lookup = tt.build_lookup()
     unique_tags = len(set(lookup.values()))
     print(f"Loaded {len(lookup)} subject strings across {unique_tags} {tt.name}", file=sys.stderr)
 
@@ -121,7 +92,7 @@ def cmd_analyze(args: argparse.Namespace) -> None:
                     continue
                 
                 # Normalize and look up subject in the lookup table
-                slug = lookup.get(normalize(subj))
+                slug = tt.classify(subj)
                 if slug:
                     matched.add(slug)
 
@@ -168,7 +139,7 @@ def cmd_unmapped(args: argparse.Namespace) -> None:
     tt = matches[0]
     
     # Build lookup and report
-    lookup = build_lookup(tt)
+    lookup = tt.build_lookup()
     print(f"Loaded {len(lookup)} subject strings", file=sys.stderr)
 
     # Validate and expand dump path

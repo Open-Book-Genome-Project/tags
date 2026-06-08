@@ -34,3 +34,32 @@ class TagType:
                 return result
         from tags.classify import default_classify
         return default_classify(subject, self)
+
+    def build_lookup(self) -> dict[str, str]:
+        """
+        Build a flat subject -> slug from a TagType's vocabulary and mappings.
+
+        Sources (later wins):
+            1. vocabulary.json - slug and tag name as direct match terms
+            2. mappings/<type>.json - curated alias mappings
+        """
+        if hasattr(self, "_lookup"):
+            # Return cached lookup if already built
+            return self._lookup
+        from tags.classify import normalize
+        out = {}
+
+        for entry in self.vocabulary.get("tags", []):
+             # From vocabulary: slug -> slug, tag name -> slug
+            slug = entry.get("slug", "")
+            out[normalize(slug)] = slug
+            out[normalize(entry.get("tag", ""))] = slug
+            for alias in entry.get("aliases", []):
+                out[normalize(alias)] = slug
+
+        for subject, slug in self.mappings.items():
+            # From mappings: subject string -> slug
+            out[normalize(subject)] = slug
+        self._lookup = out
+
+        return out
