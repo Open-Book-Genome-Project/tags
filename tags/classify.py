@@ -28,4 +28,4 @@ def default_classify(subject: str, tt: TagType) -> str | None:
     Subclasses can call this as a fallback after custom logic.
     """
     key = normalize(subject)
-    return tt.mappings.get(key)
+    return tt.build_lookup.get(key)

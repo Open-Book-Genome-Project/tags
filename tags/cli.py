@@ -36,7 +36,7 @@ def cmd_analyze(args: argparse.Namespace) -> None:
     tt = matches[0]
     
     # Build lookup and report
-    lookup = build_lookup(tt)
+    lookup = tt.build_lookup()
     unique_tags = len(set(lookup.values()))
     print(f"Loaded {len(lookup)} subject strings across {unique_tags} {tt.name}", file=sys.stderr)
 
@@ -127,7 +127,7 @@ def cmd_unmapped(args: argparse.Namespace) -> None:
     tt = matches[0]
     
     # Build lookup and report
-    lookup = build_lookup(tt)
+    lookup = tt.build_lookup()
     print(f"Loaded {len(lookup)} subject strings", file=sys.stderr)
 
     # Validate and expand dump path
