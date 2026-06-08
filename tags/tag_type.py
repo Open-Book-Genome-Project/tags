@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Callable, Optional
 
 
+
 def normalize(subject: str) -> str:
     """Lowercase, strip, and NFC-normalize a subject string."""
     return unicodedata.normalize('NFC', subject.lower().strip())
@@ -29,7 +30,6 @@ class TagMatch:
     value: str
     source: str
     reason: str = "direct mapping"
-
 
 @dataclass
 class TagType:
