@@ -3,6 +3,7 @@
   "label": "Subgenres",
   "description": "Specific structural frameworks, world-states, or narrative logics that operate within a genre.",
   "controlled": true,
+  "version": "2026-04-13",
   "tags": [
     {
       "tag": "Apocalyptic",
