@@ -1,5 +1,5 @@
 """
-tag_type.py
+    tag_type.py
 
 Core data infrastructure for the tags project:
     - normalize: lowercase + strip + NFC normalization
@@ -16,6 +16,8 @@ import unicodedata
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Optional
+
+
 
 
 
@@ -37,7 +39,7 @@ class TagType:
     name: str
     directory: Path
     priority: int = 100
-    vocabulary: dict = field(default_factory=dict)
+    vocabulary: dict =  field(default_factory=dict)
     mappings: dict = field(default_factory=dict)
     classify_fn: Optional[Callable[["TagType", dict], list[TagMatch]]] = None
 
