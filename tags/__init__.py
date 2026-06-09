@@ -8,7 +8,7 @@ import importlib
 import json
 from pathlib import Path
 from typing import Optional
-from tags.tag_type import TagType, Classifier
+from tags.tag_type import TagType
 
 REPO_ROOT = Path(__file__).parent.parent
 
@@ -49,7 +49,7 @@ def load_all(root: Optional[Path] = None) -> list[TagType]:
             maps = {}
 
         # Optional custom classify function
-        fn: Optional[Classifier] = None
+        fn = None
         if (d / "classify.py").exists():
             mod = importlib.import_module(f"tag_types.{name}.classify")
             fn = getattr(mod, "classify", None)
