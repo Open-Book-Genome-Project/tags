@@ -1,9 +1,11 @@
 """
 classify.py
 
-Default classification logic for TagType instances.
-Most tag types (genres, subgenres, moods, etc.) use this 
-function rather than writing custom classify.py files.
+Shared classification helpers for tag types:
+    - normalize: lowercase + strip + NFC normalization
+    - build_lookup: builds a flat subject -> slug dict from vocabulary and mappings
+
+Used by the CLI (analyze/unmapped) and custom classify.py files.
 """
 
 import unicodedata
@@ -18,14 +20,30 @@ def normalize(subject: str) -> str:
     return unicodedata.normalize('NFC', subject.lower().strip())
 
 #------------------------------------------------------------------------
-# Default classifier
+# Build Lookup
 #------------------------------------------------------------------------
 
-def default_classify(subject: str, tt: TagType) -> str | None:
+def build_lookup(tt: TagType) -> dict[str, str]:
     """
-    Look up a subject string in the tag type's mappings.
-    Returns the canonical slug if found, None otherwise.
-    Subclasses can call this as a fallback after custom logic.
+    Build a flat subject -> slug dict from a TagType's vocabulary and mappings.
+
+    Sources (later wins i.e If the same key appears twice, the last one overwrites the first):
+        1. vocabulary.json - slug, tag name, and aliases as match terms
+        2. mappings/<type>.json - curated subject-to-slug entries
     """
-    key = normalize(subject)
-    return tt.build_lookup.get(key)
+    lookup: dict[str, str] = {}
+
+    # From vocabulary: slug -> slug, tag name -> slug
+    for entry in tt.vocabulary.get("tags", []):
+        slug = entry.get("slug", "")
+        lookup[normalize(slug)] = slug
+        # We normalize Display Name as well in case someone searches with it to catch both variants
+        lookup[normalize(entry.get("tag", ""))] = slug
+        for alias in entry.get("aliases", []):
+           lookup[normalize(alias)] = slug
+
+    # From mappings: subject string -> slug
+    for subject, slug in tt.mappings.items():
+        lookup[normalize(subject)] = slug
+
+    return lookup

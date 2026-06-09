@@ -16,7 +16,7 @@ from collections import defaultdict
 from pathlib import Path
 
 from tags import load_all
-from tags.classify import normalize
+from tags.classify import normalize, build_lookup
 
 #-----------------------------------------------------------------------------
 # Analyze - coverage scan
@@ -47,7 +47,7 @@ def cmd_analyze(args: argparse.Namespace) -> None:
         sys.exit(1)
 
     # Initialize counters
-    total = 0
+    total = 0 
     with_subjects = 0
     with_tag = 0
     tag_counts: dict[str, int] = defaultdict(int)
@@ -74,7 +74,7 @@ def cmd_analyze(args: argparse.Namespace) -> None:
             
             # Parse JSON data from the 5th column
             try:
-                record = json.loads(parts[4])
+                record = json.loads(parts[4]) # parse json string into a python dict
             except json.JSONDecodeError:
                 continue
 
@@ -85,22 +85,11 @@ def cmd_analyze(args: argparse.Namespace) -> None:
             with_subjects += 1
 
             # Find matched tags for this work
-            matched: set[str] = set()
-            for subj in subjects:
-                # Skip non-string subjects
-                if not isinstance(subj, str):
-                    continue
-                
-                # Normalize and look up subject in the lookup table
-                slug = tt.classify(subj)
-                if slug:
-                    matched.add(slug)
-
-            # Count this work and its matched tags
-            if matched:
+            matches = tt.classify(record)
+            if matches:
                 with_tag += 1
-                for slug in matched:
-                    tag_counts[slug] += 1
+                for m in matches:
+                    tag_counts[m.value] += 1
 
     # Calculate coverage percentages
     pct_subjects = (with_tag / with_subjects * 100) if with_subjects else 0
@@ -191,14 +180,10 @@ def cmd_unmapped(args: argparse.Namespace) -> None:
                 if not isinstance(subj, str):
                     continue
                 
-                # Normalize the subject string
-                key = normalize(subj)
-                if not key:
-                    continue
-                
-                # If subject is not in lookup, count it as unmapped
-                if key not in lookup:
-                    unmapped[key] += 1
+                if not tt.classify({"subjects": [subj]}):
+                    key = normalize(subj)
+                    if key:
+                        unmapped[key] += 1
 
     sorted_unmapped = sorted(unmapped.items(), key=lambda x: -x[1])
 
