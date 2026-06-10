@@ -16,7 +16,7 @@ from collections import defaultdict
 from pathlib import Path
 
 from tags import load_all
-from tags.classify import normalize, build_lookup
+from tags.tag_type import normalize, build_lookup
 
 #-----------------------------------------------------------------------------
 # Analyze - coverage scan

@@ -9,7 +9,7 @@ import json
 from pathlib import Path
 from typing import Optional
 from tags.tag_type import TagType
-from tags.classify import normalize
+from tags.tag_type import normalize 
 
 REPO_ROOT = Path(__file__).parent.parent
 
