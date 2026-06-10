@@ -1,5 +1,5 @@
 """
-    tag_type.py
+tag_type.py
 
 Core data infrastructure for the tags project:
     - normalize: lowercase + strip + NFC normalization
@@ -21,6 +21,7 @@ from typing import Callable, Optional
 
 
 
+
 def normalize(subject: str) -> str:
     """Lowercase, strip, and NFC-normalize a subject string."""
     return unicodedata.normalize('NFC', subject.lower().strip())
@@ -33,13 +34,14 @@ class TagMatch:
     source: str
     reason: str = "direct mapping"
 
+
 @dataclass
 class TagType:
     """A profile card for one tag type."""
     name: str
     directory: Path
     priority: int = 100
-    vocabulary: dict =  field(default_factory=dict)
+    vocabulary: dict = field(default_factory=dict)
     mappings: dict = field(default_factory=dict)
     classify_fn: Optional[Callable[["TagType", dict], list[TagMatch]]] = None
 
