@@ -153,8 +153,8 @@ def cmd_unmapped(args: argparse.Namespace) -> None:
                 break
             total += 1
 
-            # Print progress every 200,000 works
-            if total % 200_000 == 0:
+             # Print progress at specified intervals
+            if args.progress and total % args.progress == 0:
                 print(f"  ... {total:,} works, {len(unmapped)} unique unmapped", file=sys.stderr, flush=True)
     
             # Split the line into 5 parts (separated by tabs)
@@ -219,6 +219,7 @@ def main():
     up.add_argument("dump", help="Path to works dump (.txt or .txt.gz)")
     up.add_argument("--limit", type=int, default=None, help="Max works to scan")
     up.add_argument("--top", type=int, default=40, help="Number of top unmapped to show")
+    up.add_argument("--progress", type=int, default=None, help="Progress every N works")
 
     args = parser.parse_args()
 
