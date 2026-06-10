@@ -7,12 +7,12 @@
   "content_features": {"priority": 30},
   "content_warnings": {"priority": 35},
   "literary_form": {"priority": 40},
-  "literary_themes": {},
-  "literary_tropes": {},
-  "main_topics": {},
-  "sub_topics": {},
-  "people": {},
-  "places": {},
-  "things": {},
-  "times": {}
+  "literary_themes": {"priority": 45},
+  "literary_tropes": {"priority": 50},
+  "main_topics": {"priority": 55},
+  "sub_topics": {"priority": 60},
+  "people": {"priority": 65},
+  "places": {"priority": 70},
+  "things": {"priority": 75},
+  "times": {"priority": 80}
 }
