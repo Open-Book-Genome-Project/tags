@@ -6,3 +6,8 @@ tags.json
 
 # Logs
 wget-log
+CHISOM_AGENTS.md
+CLAUDE.md
+FLOWCHART.md
+ol_tags.egg-info/
+test_basic.py
