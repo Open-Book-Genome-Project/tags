@@ -36,10 +36,11 @@ class TagType:
          return default_classify(self, work)
     
 def default_classify(tt: TagType, work: dict) -> list[TagMatch]:
-    """"""
+    """Classify a work by matching its subjects against this type's mappings."""
+    from tags.classify import normalize  # local import avoids circular dependency
     results = []
     for subject in work.get("subjects", []):
-        slug = tt.mappings.get(subject.lower().strip())
+        slug = tt.mappings.get(normalize(subject))
         if slug:
             results.append(TagMatch(value=slug, source=subject))
     return results

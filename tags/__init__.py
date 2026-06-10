@@ -9,6 +9,7 @@ import json
 from pathlib import Path
 from typing import Optional
 from tags.tag_type import TagType
+from tags.classify import normalize
 
 REPO_ROOT = Path(__file__).parent.parent
 
@@ -44,7 +45,8 @@ def load_all(root: Optional[Path] = None) -> list[TagType]:
         # Mappings: mappings/<type>.json
         maps_path = REPO_ROOT / "mappings" / f"{name}.json"
         if maps_path.exists():
-            maps = json.loads(maps_path.read_text())
+            raw_maps = json.loads(maps_path.read_text())
+            maps = {normalize(k): v for k, v in raw_maps.items()}
         else:
             maps = {}
 
