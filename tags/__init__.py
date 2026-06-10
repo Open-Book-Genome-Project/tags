@@ -20,11 +20,7 @@ REPO_ROOT = Path(__file__).parent.parent
 def load_all(root: Optional[Path] = None) -> list[TagType]:
     """
     Read tag_types/registry.json and build TagType instances for 
-    every registered type.
-    Currently reads from pre-migration paths:
-        - vocabulary: <type>/vocabulary.json (e.g. genres/vocabulary.json)
-        - mappings: <type>.json (e.g. mappings/genres.json)
-    After PR #2 migration, these will read from tag_types/<type>/.
+    every registered tag type.
     """
     if root is None:
         root = REPO_ROOT / "tag_types"
