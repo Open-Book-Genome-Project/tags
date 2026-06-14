@@ -6,7 +6,6 @@
   "audio: juvenile": "Juvenile",
   "juvenile poetry": "Juvenile",
   "juvenile drama": "Juvenile",
-
   "children's fiction": "Children",
   "children's literature": "Children",
   "children's nonfiction": "Children",
@@ -25,8 +24,6 @@
   "children's books/ages 9-12 nonfiction": "Children",
   "picture books": "Children",
   "picture books for children": "Children",
-  "children": "Children",
-
   "children: young adult (gr. 7-9)": "Young Adult",
   "children: young adult (gr. 10-12)": "Young Adult",
   "children's books - young adult fiction": "Young Adult",
@@ -43,22 +40,17 @@
   "teen fiction": "Young Adult",
   "teenage fiction": "Young Adult",
   "ya fiction": "Young Adult",
-
   "children: kindergarten": "Preschool",
   "children: preschool": "Preschool",
   "children: babies & toddlers": "Preschool",
   "board books": "Preschool",
   "baby books": "Preschool",
-
   "middle grade": "Middle Grade",
   "middle-grade": "Middle Grade",
-
   "readers (adult)": "Adult",
   "adult fiction": "Adult",
-
   "academic": "Academic",
   "scholarly": "Academic",
   "textbooks": "Academic",
-
   "children's books/all ages": "General / All Ages"
 }
