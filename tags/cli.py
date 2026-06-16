@@ -94,7 +94,6 @@ def cmd_analyze(args: argparse.Namespace) -> None:
     # Calculate coverage percentages
     pct_subjects = (with_tag / with_subjects * 100) if with_subjects else 0
     pct_total = (with_tag / total * 100) if total else 0
-
     # Print summary results
     print(f"\nTotal works scanned:                {total:,}")
     print(f"Works with at least one subject:    {with_subjects:,}")
