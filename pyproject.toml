@@ -1,0 +1,15 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ol-tags"
+version = "0.1.0"
+description = "Canonical tags for Open Library"
+requires-python = ">=3.10"
+
+[tool.setuptools.packages.find]
+include = ["tags", "tags.*", "tag_types", "tag_types.*"]
+
+[project.scripts]
+tags = "tags.cli:main"

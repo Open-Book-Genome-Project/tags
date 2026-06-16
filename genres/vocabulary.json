@@ -3,6 +3,7 @@
   "label": "Genres",
   "description": "The stylistic vibe or market category the book belongs to; the emotional promise made to the reader.",
   "controlled": true,
+  "version": "2026-04-13",
   "tags": [
     {
       "tag": "Absurd",

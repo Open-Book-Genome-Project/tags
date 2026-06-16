@@ -136,3 +136,54 @@ When in doubt: if the subgenre already communicates the genre, don't repeat the 
 - Definitions should be one sentence, specific enough to be exclusionary
 - List entries alphabetically within each vocabulary file
 - `vocabulary.json` is the machine-readable source of truth; `vocabulary.md` is the human-readable companion — keep them in sync when editing either
+
+---
+
+## Data Contracts
+
+These rules govern how subject strings and mapping files are handled across all tag types. They are enforced by `tags validate` in CI.
+
+### 1. Normalization
+
+All subject strings and mapping keys are normalized before matching:
+- **Lowercase** - `"Science Fiction"` and `"science fiction"` match identically
+- **Whitespace-stripped** - leading/trailing spaces removed
+- **NFC-normalized** - Unicode characters are in Canonical Composition form (e.g., `é` as a single character, not `e` + combining accent)
+
+Normalization is applied both when writing mapping files and at classification time.
+
+### 2. Slug-Based Mapping values
+
+Mapping values in `mappings.json` reference **slugs** (stable identifiers), not display names. This decouples the mapping dictionary from display-layer changes.
+
+**Correct:**
+```json
+{ "science fiction": "sci-fi" }
+```
+
+**Incorrect:**
+```json
+{ "science fiction": "Sci-Fi"}
+```
+
+### 3. Multi-Type Output
+
+A single string may produce tags in multiple types. The pipeline does not short-circuit after the first match; it collects from all registered tag types.
+
+For example, `"detective fiction"` correctly produces both `genre:mystery` and `subgenre:Detective`.
+
+### 4. Slug Stability
+
+When a slug is renamed, the old slug is preserved as an alias to prevent breaking existing mappings.
+
+Add an `old_slugs` field to the vocabulary entry:
+
+```json
+{
+    "tag": "Sci-Fi",
+    "slug": "science-fiction",
+    "old_slugs": ["sci-fi"]
+}
+```
+
+The loader automatically resolves old slugs to the current value.
