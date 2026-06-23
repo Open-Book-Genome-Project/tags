@@ -1,9 +1,13 @@
+# LCSH suffix extraction and conflict resolution logic originally developed by
+# @modi02 in PR #4 (raj/literary-form-pack). Ported to the classify(tt, work)
+# plugin interface by Dewey; core algorithm and signal sets are unchanged.
+
 from tags.tag_type import TagMatch, normalize
 
 # Strong unambiguous nonfiction markers. When both fiction and nonfiction
 # signals appear in a work's subjects, nonfiction wins only if one of these
 # is present — preventing topic subdivisions like "history" on historical
-# fiction works from flipping the classification. (Ported from PR #4.)
+# fiction works from flipping the classification.
 STRONG_NONFICTION = {
     "biography", "biographies", "biographical",
     "autobiography", "autobiographies", "autobiographical",
