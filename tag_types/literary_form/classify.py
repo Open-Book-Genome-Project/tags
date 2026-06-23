@@ -10,7 +10,7 @@ def _form_slug(s: str, mappings: dict) -> tuple:
     slug = mappings.get(s)
     if slug:
         return slug, "direct mapping"
-    # Check nonfiction before fiction — "nonfiction" contains "fiction"
+    # nonfiction MUST be checked before fiction — "nonfiction" contains "fiction"
     if "nonfiction" in s or "non-fiction" in s:
         return "nonfiction", "contains nonfiction"
     if "fiction" in s:
