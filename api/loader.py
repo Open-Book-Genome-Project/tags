@@ -73,10 +73,10 @@ def load_all_vocabularies() -> list[dict]:
     """
     vocabularies = []
 
-    for type_dir in sorted(REPO_ROOT.iterdir()):
+    for type_dir in sorted((REPO_ROOT / "tag_types").iterdir()):
         if not type_dir.is_dir():
             continue
-        if type_dir.name.startswith(".") or type_dir.name in ("api", "scripts"):
+        if type_dir.name.startswith("."):
             continue
 
         vocab_file = type_dir / "vocabulary.json"
