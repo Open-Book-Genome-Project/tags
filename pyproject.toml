@@ -15,7 +15,7 @@ include = ["tags", "tags.*", "tag_types", "tag_types.*"]
 tags = "tags.cli:main"
 
 [project.optional-dependencies]
-dev = ["pytest>=8.0", "pytest-cov"]
+dev = ["pytest>=8.0", "pytest-cov", "requests"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
