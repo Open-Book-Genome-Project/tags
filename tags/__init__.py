@@ -62,3 +62,24 @@ def load_all(root: Optional[Path] = None) -> list[TagType]:
         ))
 
     return sorted(out, key=lambda t: t.priority)
+
+
+def slug_to_tag_key(type_name: str, slug: str, root: Optional[Path] = None) -> str | None:
+    """Return the OL Tag key for a type+slug pair, or None if not yet created.
+
+    Convenience wrapper for migration scripts that don't need the full TagType
+    object. Reads vocabulary.json directly — does not require load_all().
+
+    Example:
+        key = slug_to_tag_key("genres", "fantasy")  # "OL123T" once tags are created
+    """
+    if root is None:
+        root = REPO_ROOT / "tag_types"
+    vocab_path = root / type_name / "vocabulary.json"
+    if not vocab_path.exists():
+        return None
+    vocab = json.loads(vocab_path.read_text())
+    for tag in vocab.get("tags", []):
+        if tag.get("slug") == slug:
+            return tag.get("key")
+    return None
