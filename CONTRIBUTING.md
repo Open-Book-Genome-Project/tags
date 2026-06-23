@@ -187,3 +187,18 @@ Add an `old_slugs` field to the vocabulary entry:
 ```
 
 The loader automatically resolves old slugs to the current value.
+
+### 5. OL Tag Key (`key` field)
+
+Each `vocabulary.json` tag entry may carry an optional `key` field containing the corresponding Open Library Tag object key (e.g. `"OL123T"`). This field is populated by the Tag creation script after OL Tag objects are created — do not add placeholder `null` values.
+
+```json
+{
+    "tag": "Fantasy",
+    "slug": "fantasy",
+    "definition": "...",
+    "key": "OL123T"
+}
+```
+
+Use `TagType.tag_key(slug)` or `slug_to_tag_key(type_name, slug)` to look up a tag key at runtime. Both return `None` for any slug that hasn't had a Tag object created yet. Migration scripts use this to populate `work.genres`, `work.audience`, etc. with Tag keys rather than slugs.
