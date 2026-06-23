@@ -2,12 +2,13 @@
 Tests for scripts/backfill_genre_tags.py
 """
 import pytest
-from scripts.backfill_genre_tags import prefixes_to_add, apply_prefixes, SubjectClassifier
+from tags import load_all
+from scripts.backfill_genre_tags import prefixes_to_add, apply_prefixes
 
 
-@pytest.fixture
-def classifier():
-    return SubjectClassifier()
+@pytest.fixture(scope="module")
+def tag_types():
+    return load_all()
 
 
 class TestPrefixesToAdd:
@@ -48,29 +49,29 @@ class TestPrefixesToAdd:
 
 
 class TestApplyPrefixes:
-    def test_adds_prefix_to_subjects(self, classifier):
+    def test_adds_prefix_to_subjects(self, tag_types):
         work = {"key": "/works/OL1W", "subjects": ["Fantasy fiction"]}
-        updated, additions = apply_prefixes(work, classifier)
+        updated, additions = apply_prefixes(work, tag_types)
         assert any(a.startswith("genre:") for a in additions)
         assert all(a in updated["subjects"] for a in additions)
 
-    def test_does_not_mutate_original(self, classifier):
+    def test_does_not_mutate_original(self, tag_types):
         work = {"key": "/works/OL1W", "subjects": ["Fantasy fiction"]}
         original_subjects = list(work["subjects"])
-        apply_prefixes(work, classifier)
+        apply_prefixes(work, tag_types)
         assert work["subjects"] == original_subjects
 
-    def test_no_additions_when_already_tagged(self, classifier):
+    def test_no_additions_when_already_tagged(self, tag_types):
         work = {"key": "/works/OL1W", "subjects": ["Fantasy fiction", "genre:fantasy"]}
-        _, additions = apply_prefixes(work, classifier)
+        _, additions = apply_prefixes(work, tag_types)
         assert "genre:fantasy" not in additions
 
-    def test_empty_subjects_returns_no_additions(self, classifier):
+    def test_empty_subjects_returns_no_additions(self, tag_types):
         work = {"key": "/works/OL1W", "subjects": []}
-        _, additions = apply_prefixes(work, classifier)
+        _, additions = apply_prefixes(work, tag_types)
         assert additions == []
 
-    def test_unmapped_subject_not_added(self, classifier):
+    def test_unmapped_subject_not_added(self, tag_types):
         work = {"key": "/works/OL1W", "subjects": ["Completely unmapped subject xyz"]}
-        _, additions = apply_prefixes(work, classifier)
+        _, additions = apply_prefixes(work, tag_types)
         assert additions == []
