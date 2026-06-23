@@ -51,6 +51,17 @@ class TagType:
             return self.classify_fn(self, work)
         return default_classify(self, work)
 
+    def tag_key(self, slug: str) -> str | None:
+        """Return the OL Tag key (e.g. 'OL123T') for a slug, or None if not yet created.
+
+        Tag keys are written back into vocabulary.json after OL Tag objects are
+        created. Until then, this returns None for all slugs.
+        """
+        for tag in self.vocabulary.get("tags", []):
+            if tag.get("slug") == slug:
+                return tag.get("key")
+        return None
+
 
 def build_lookup(tt: TagType) -> dict[str, str]:
     """Build a flat subject->slug dict from a TagType's vocabulary and mappings.

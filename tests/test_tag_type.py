@@ -85,6 +85,34 @@ class TestTagType:
         assert tt.classify({}) == []
         assert tt.classify({"subjects": []}) == []
 
+    def test_tag_key_returns_key_when_present(self, tmp_path):
+        tt = TagType(
+            name="genres",
+            directory=tmp_path,
+            vocabulary={"tags": [{"slug": "fantasy", "tag": "Fantasy", "key": "OL123T"}]},
+        )
+        assert tt.tag_key("fantasy") == "OL123T"
+
+    def test_tag_key_returns_none_when_missing(self, tmp_path):
+        tt = TagType(
+            name="genres",
+            directory=tmp_path,
+            vocabulary={"tags": [{"slug": "fantasy", "tag": "Fantasy"}]},
+        )
+        assert tt.tag_key("fantasy") is None
+
+    def test_tag_key_returns_none_for_unknown_slug(self, tmp_path):
+        tt = TagType(
+            name="genres",
+            directory=tmp_path,
+            vocabulary={"tags": [{"slug": "fantasy", "tag": "Fantasy", "key": "OL123T"}]},
+        )
+        assert tt.tag_key("horror") is None
+
+    def test_tag_key_empty_vocabulary(self, tmp_path):
+        tt = TagType(name="genres", directory=tmp_path)
+        assert tt.tag_key("fantasy") is None
+
 
 # ---------------------------------------------------------------------------
 # build_lookup
