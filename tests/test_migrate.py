@@ -170,6 +170,10 @@ class TestClassifyWorkUnit:
 # Require: PR #15 merged (correct TAG_TYPES_DIR paths)
 # ---------------------------------------------------------------------------
 
+@pytest.mark.xfail(
+    reason="SubjectClassifier uses wrong MAPPINGS_DIR on main — blocked on PR #15",
+    strict=False,
+)
 class TestClassifierIntegration:
     @pytest.fixture(scope="class")
     def classifier(self):
