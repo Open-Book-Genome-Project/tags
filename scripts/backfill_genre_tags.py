@@ -33,13 +33,12 @@ import requests
 REPO_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
-from scripts.migrate_subjects import SubjectClassifier, normalize  # noqa: E402
+from tags import load_all  # noqa: E402
 
 OL_WORK_URL = "https://openlibrary.org/works/{key}.json"
 OL_SAVE_URL = "https://openlibrary.org/api/save_many"
 
-# Types that get a prefixed subject string written back.
-# Ordered by priority (genres first).
+# Types that get a prefixed subject string written back, in priority order.
 BACKFILL_TYPES = [
     "genres",
     "subgenres",
@@ -63,7 +62,22 @@ TYPE_PREFIX = {
 }
 
 
-def prefixes_to_add(classified: dict, existing_subjects: list[str]) -> list[str]:
+def classify_work(work: dict, tag_types: list) -> dict:
+    """Classify a work using the TagType plugin pipeline.
+
+    Returns {type_name: [slug, ...]} for each type in BACKFILL_TYPES.
+    """
+    result = {name: [] for name in BACKFILL_TYPES}
+    for tt in tag_types:
+        if tt.name not in BACKFILL_TYPES:
+            continue
+        matches = tt.classify(work)
+        if matches:
+            result[tt.name] = [m.value for m in matches]
+    return result
+
+
+def prefixes_to_add(classified: dict, existing_subjects: list) -> list:
     """Return prefix strings not already in subjects[]."""
     existing_lower = {s.lower().strip() for s in existing_subjects}
     to_add = []
@@ -82,7 +96,7 @@ def prefixes_to_add(classified: dict, existing_subjects: list[str]) -> list[str]
 
 def cmd_scan(args):
     """Read dump, print work keys where subjects would gain prefix strings."""
-    classifier = SubjectClassifier()
+    tag_types = load_all()
     dump_path = Path(args.dump)
 
     opener = gzip.open if dump_path.suffix == ".gz" else open
@@ -107,7 +121,7 @@ def cmd_scan(args):
                 continue
 
             scanned += 1
-            classified = classifier.classify_work(work)
+            classified = classify_work(work, tag_types)
             additions = prefixes_to_add(classified, work.get("subjects", []))
             if additions:
                 count += 1
@@ -133,9 +147,9 @@ def fetch_work(key: str) -> dict | None:
     return resp.json()
 
 
-def apply_prefixes(work: dict, classifier: SubjectClassifier) -> tuple[dict, list[str]]:
+def apply_prefixes(work: dict, tag_types: list) -> tuple:
     """Return (updated_work, additions). work is not mutated."""
-    classified = classifier.classify_work(work)
+    classified = classify_work(work, tag_types)
     additions = prefixes_to_add(classified, work.get("subjects", []))
     if not additions:
         return work, []
@@ -146,7 +160,7 @@ def apply_prefixes(work: dict, classifier: SubjectClassifier) -> tuple[dict, lis
 
 def cmd_apply(args):
     """Fetch works by key, apply prefix tags, dry-run or save."""
-    classifier = SubjectClassifier()
+    tag_types = load_all()
     keys_path = Path(args.keys)
     keys = [k.strip() for k in keys_path.read_text().splitlines() if k.strip() and not k.startswith("#")]
 
@@ -178,7 +192,7 @@ def cmd_apply(args):
             skipped += 1
             continue
 
-        updated, additions = apply_prefixes(work, classifier)
+        updated, additions = apply_prefixes(work, tag_types)
         if not additions:
             skipped += 1
             continue
