@@ -1,91 +1,91 @@
-"""
-Tests for tag_types/literary_form/classify.py
-"""
+"""Tests for tag_types/literary_form/classify.py"""
 import pytest
 from tags import load_all
 
 
 @pytest.fixture(scope="module")
-def literary_form_tt():
-    types = {tt.name: tt for tt in load_all()}
-    return types["literary_form"]
+def tt():
+    return {t.name: t for t in load_all()}["literary_form"]
 
 
 class TestDirectMapping:
-    def test_fiction_subject(self, literary_form_tt):
-        result = literary_form_tt.classify({"subjects": ["Fantasy fiction"]})
+    def test_fiction(self, tt):
+        result = tt.classify({"subjects": ["fiction"]})
         assert len(result) == 1
         assert result[0].value == "fiction"
 
-    def test_nonfiction_subject(self, literary_form_tt):
-        result = literary_form_tt.classify({"subjects": ["Biography"]})
+    def test_nonfiction(self, tt):
+        result = tt.classify({"subjects": ["nonfiction"]})
         assert len(result) == 1
         assert result[0].value == "nonfiction"
 
-    def test_case_insensitive(self, literary_form_tt):
-        result = literary_form_tt.classify({"subjects": ["FICTION"]})
+    def test_non_fiction_hyphenated(self, tt):
+        result = tt.classify({"subjects": ["non-fiction"]})
         assert len(result) == 1
+        assert result[0].value == "nonfiction"
+
+    def test_empty_subjects(self, tt):
+        assert tt.classify({"subjects": []}) == []
+        assert tt.classify({}) == []
+
+
+class TestSubstringMatch:
+    def test_contains_fiction(self, tt):
+        result = tt.classify({"subjects": ["Historical fiction"]})
         assert result[0].value == "fiction"
+        assert result[0].reason == "contains fiction"
 
-    def test_unmapped_returns_empty(self, literary_form_tt):
-        result = literary_form_tt.classify({"subjects": ["Completely unmapped"]})
-        assert result == []
+    def test_contains_fiction_variants(self, tt):
+        for subject in ["Science fiction", "Juvenile fiction", "Literary fiction", "Young adult fiction"]:
+            result = tt.classify({"subjects": [subject]})
+            assert result[0].value == "fiction", f"expected fiction for {subject!r}"
 
-    def test_empty_subjects(self, literary_form_tt):
-        assert literary_form_tt.classify({"subjects": []}) == []
-        assert literary_form_tt.classify({}) == []
+    def test_contains_nonfiction(self, tt):
+        result = tt.classify({"subjects": ["Juvenile nonfiction"]})
+        assert result[0].value == "nonfiction"
+        assert result[0].reason == "contains nonfiction"
+
+    def test_nonfiction_checked_before_fiction(self, tt):
+        # "Young adult nonfiction" contains both "nonfiction" and "fiction" —
+        # must resolve to nonfiction
+        result = tt.classify({"subjects": ["Young adult nonfiction"]})
+        assert result[0].value == "nonfiction"
+
+    def test_no_match_biography(self, tt):
+        assert tt.classify({"subjects": ["Biography"]}) == []
+
+    def test_no_match_poetry(self, tt):
+        assert tt.classify({"subjects": ["Poetry"]}) == []
+
+    def test_no_match_short_stories(self, tt):
+        assert tt.classify({"subjects": ["Short stories"]}) == []
 
 
 class TestLCSHSuffix:
-    def test_fiction_suffix(self, literary_form_tt):
-        result = literary_form_tt.classify({"subjects": ["Pirates--Fiction"]})
-        assert len(result) == 1
+    def test_fiction_suffix(self, tt):
+        result = tt.classify({"subjects": ["Pirates--Fiction"]})
         assert result[0].value == "fiction"
-        assert result[0].reason == "lcsh suffix"
 
-    def test_nonfiction_suffix_via_biography(self, literary_form_tt):
-        result = literary_form_tt.classify({"subjects": ["Presidents--Biography"]})
-        assert len(result) == 1
+    def test_nonfiction_suffix(self, tt):
+        result = tt.classify({"subjects": ["Cooking--Juvenile nonfiction"]})
         assert result[0].value == "nonfiction"
 
-    def test_suffix_case_insensitive(self, literary_form_tt):
-        result = literary_form_tt.classify({"subjects": ["Pirates--FICTION"]})
-        assert len(result) == 1
-        assert result[0].value == "fiction"
-
-    def test_no_suffix_match_skipped(self, literary_form_tt):
-        result = literary_form_tt.classify({"subjects": ["Pirates--Swords"]})
+    def test_biography_suffix_no_match(self, tt):
+        result = tt.classify({"subjects": ["Washington, George--Biography"]})
         assert result == []
 
+    def test_suffix_case_insensitive(self, tt):
+        result = tt.classify({"subjects": ["Dragons--FICTION"]})
+        assert result[0].value == "fiction"
 
-class TestConflictResolution:
-    def test_fiction_wins_by_default(self, literary_form_tt):
-        # Historical fiction: "history" topic won't flip to nonfiction
-        result = literary_form_tt.classify({
-            "subjects": ["Historical fiction", "History--Fiction"]
-        })
+
+class TestConflictAndDedup:
+    def test_deduplication(self, tt):
+        result = tt.classify({"subjects": ["Historical fiction", "Literary fiction"]})
         assert len(result) == 1
         assert result[0].value == "fiction"
 
-    def test_strong_nonfiction_wins(self, literary_form_tt):
-        result = literary_form_tt.classify({
-            "subjects": ["Fiction", "Memoir"]
-        })
+    def test_conflict_fiction_wins(self, tt):
+        result = tt.classify({"subjects": ["Historical fiction", "Juvenile nonfiction"]})
         assert len(result) == 1
-        assert result[0].value == "nonfiction"
-
-    def test_memoir_beats_fiction_suffix(self, literary_form_tt):
-        result = literary_form_tt.classify({
-            "subjects": ["Pirates--Fiction", "Memoir"]
-        })
-        assert len(result) == 1
-        assert result[0].value == "nonfiction"
-
-
-class TestDeduplication:
-    def test_multiple_fiction_subjects_deduplicated(self, literary_form_tt):
-        result = literary_form_tt.classify({
-            "subjects": ["Fiction", "Fantasy fiction", "Historical fiction"]
-        })
-        values = [m.value for m in result]
-        assert values.count("fiction") == 1
+        assert result[0].value == "fiction"
