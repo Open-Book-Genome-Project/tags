@@ -6,7 +6,7 @@ load_all_vocabularies() is the API loader (vocabulary dicts for TagDB.seed()).
 """
 import pytest
 from pathlib import Path
-from tags import load_all
+from tags import load_all, slug_to_tag_key
 from tags.tag_type import TagType
 
 
@@ -104,6 +104,33 @@ class TestLoadAll:
         tags = subgenres.vocabulary.get("tags", [])
         with_parents = [t for t in tags if t.get("parent_genres")]
         assert len(with_parents) > 0, "Subgenres should have parent_genres links"
+
+
+# ---------------------------------------------------------------------------
+# slug_to_tag_key() — convenience function for migration scripts
+# ---------------------------------------------------------------------------
+
+class TestSlugToTagKey:
+    def test_returns_none_when_no_key_set(self):
+        # No genres tags have keys yet — all should return None
+        result = slug_to_tag_key("genres", "fantasy")
+        assert result is None
+
+    def test_returns_none_for_unknown_slug(self):
+        assert slug_to_tag_key("genres", "not-a-real-slug") is None
+
+    def test_returns_none_for_unknown_type(self):
+        assert slug_to_tag_key("not-a-real-type", "fantasy") is None
+
+    def test_returns_key_when_present(self, tmp_path):
+        # Write a temporary vocabulary.json with a key field
+        import json
+        (tmp_path / "test_type").mkdir()
+        (tmp_path / "test_type" / "vocabulary.json").write_text(json.dumps({
+            "tags": [{"slug": "fantasy", "tag": "Fantasy", "key": "OL123T"}]
+        }))
+        result = slug_to_tag_key("test_type", "fantasy", root=tmp_path)
+        assert result == "OL123T"
 
 
 # ---------------------------------------------------------------------------
