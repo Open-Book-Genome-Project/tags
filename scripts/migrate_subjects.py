@@ -26,7 +26,7 @@ import requests
 # ---------------------------------------------------------------------------
 
 REPO_ROOT = Path(__file__).parent.parent
-MAPPINGS_DIR = Path(__file__).parent / "mappings"
+TAG_TYPES_DIR = REPO_ROOT / "tag_types"
 
 OL_WORK_URL = "https://openlibrary.org/works/{work_id}.json"
 
@@ -36,8 +36,17 @@ OL_WORK_URL = "https://openlibrary.org/works/{work_id}.json"
 # ---------------------------------------------------------------------------
 
 def load_mapping(name: str) -> dict[str, str]:
-    """Load a JSON mapping file from scripts/mappings/."""
-    path = MAPPINGS_DIR / f"{name}.json"
+    """Load tag_types/<name>/mappings.json."""
+    path = TAG_TYPES_DIR / name / "mappings.json"
+    if not path.exists():
+        return {}
+    with open(path) as f:
+        return json.load(f)
+
+
+def load_overrides(type_name: str, filename: str) -> dict[str, str]:
+    """Load a named override file from tag_types/<type_name>/<filename>."""
+    path = TAG_TYPES_DIR / type_name / filename
     if not path.exists():
         return {}
     with open(path) as f:
@@ -45,8 +54,8 @@ def load_mapping(name: str) -> dict[str, str]:
 
 
 def load_set(name: str) -> set[str]:
-    """Load a JSON list file as a set (e.g. droppable.json)."""
-    path = MAPPINGS_DIR / f"{name}.json"
+    """Load tag_types/<name>.json as a set (e.g. droppable.json)."""
+    path = TAG_TYPES_DIR / f"{name}.json"
     if not path.exists():
         return set()
     with open(path) as f:
@@ -95,8 +104,8 @@ class SubjectClassifier:
         self.topics_map = load_mapping("main_topics")
         self.audience_map = load_mapping("audience")
         self.droppable = load_set("droppable")
-        self.people_overrides = load_mapping("people_overrides")
-        self.places_overrides = load_mapping("places_overrides")
+        self.people_overrides = load_overrides("people", "people_overrides.json")
+        self.places_overrides = load_overrides("places", "places_overrides.json")
 
     def classify_subject(self, raw: str) -> tuple[str, str | None]:
         """
