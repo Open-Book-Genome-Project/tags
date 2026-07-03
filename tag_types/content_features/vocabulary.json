@@ -7,87 +7,104 @@
     {
       "tag": "Bibliography / References",
       "slug": "bibliography-references",
-      "definition": "A list of sources cited or consulted by the author"
+      "definition": "A list of sources cited or consulted by the author",
+      "key": "/tags/OL103T"
     },
     {
       "tag": "Charts and graphs",
       "slug": "charts-and-graphs",
-      "definition": "Data visualizations included as part of the work"
+      "definition": "Data visualizations included as part of the work",
+      "key": "/tags/OL104T"
     },
     {
       "tag": "Discussion questions",
       "slug": "discussion-questions",
-      "definition": "A set of questions for group discussion, typically at the end of the work"
+      "definition": "A set of questions for group discussion, typically at the end of the work",
+      "key": "/tags/OL105T"
     },
     {
       "tag": "Epistolary structure",
       "slug": "epistolary-structure",
-      "definition": "Narrative constructed from letters, diary entries, documents, or other found records"
+      "definition": "Narrative constructed from letters, diary entries, documents, or other found records",
+      "key": "/tags/OL106T"
     },
     {
       "tag": "Footnotes / Endnotes",
       "slug": "footnotes-endnotes",
-      "definition": "Supplementary notes appearing at the bottom of pages or end of chapters/work"
+      "definition": "Supplementary notes appearing at the bottom of pages or end of chapters/work",
+      "key": "/tags/OL107T"
     },
     {
       "tag": "Frame narrative",
       "slug": "frame-narrative",
-      "definition": "A story-within-a-story: an outer narrative that contains the central tale"
+      "definition": "A story-within-a-story: an outer narrative that contains the central tale",
+      "key": "/tags/OL108T"
     },
     {
       "tag": "Glossary",
       "slug": "glossary",
-      "definition": "A defined list of specialized terms used in the work"
+      "definition": "A defined list of specialized terms used in the work",
+      "key": "/tags/OL109T"
     },
     {
       "tag": "Illustrations (black and white)",
       "slug": "illustrations-bw",
-      "definition": "Black and white drawings, engravings, or artwork within the text"
+      "definition": "Black and white drawings, engravings, or artwork within the text",
+      "key": "/tags/OL110T"
     },
     {
       "tag": "Illustrations (color)",
       "slug": "illustrations-color",
-      "definition": "Full-color artwork, photographs, or plates within the text"
+      "definition": "Full-color artwork, photographs, or plates within the text",
+      "key": "/tags/OL111T"
     },
     {
       "tag": "Index",
       "slug": "index",
-      "definition": "An alphabetical index of names, subjects, or concepts with page references"
+      "definition": "An alphabetical index of names, subjects, or concepts with page references",
+      "key": "/tags/OL112T"
     },
     {
       "tag": "Maps",
       "slug": "maps",
-      "definition": "Geographic or world maps included as part of the work"
+      "definition": "Geographic or world maps included as part of the work",
+      "key": "/tags/OL113T"
     },
     {
       "tag": "Multiple narrators",
       "slug": "multiple-narrators",
-      "definition": "Two or more distinct first-person or close-third-person narrative voices"
+      "definition": "Two or more distinct first-person or close-third-person narrative voices",
+      "key": "/tags/OL114T"
     },
     {
       "tag": "Non-linear chronology",
       "slug": "non-linear-chronology",
-      "definition": "Chapters or sections are not arranged in chronological order"
+      "definition": "Chapters or sections are not arranged in chronological order",
+      "key": "/tags/OL115T"
     },
     {
       "tag": "Problem sets / Exercises",
       "slug": "problem-sets-exercises",
-      "definition": "Practice problems, exercises, or activities for the reader to complete"
+      "definition": "Practice problems, exercises, or activities for the reader to complete",
+      "key": "/tags/OL116T"
     },
     {
       "tag": "Second-person narration",
       "slug": "second-person-narration",
-      "definition": "Narrated in the second person ('you do X')"
+      "definition": "Narrated in the second person ('you do X')",
+      "key": "/tags/OL117T"
     },
     {
       "tag": "Table of contents",
       "slug": "table-of-contents",
-      "definition": "A structured listing of chapters or sections with page numbers"
+      "definition": "A structured listing of chapters or sections with page numbers",
+      "key": "/tags/OL118T"
     },
     {
       "tag": "Verse / Poetic prose",
       "slug": "verse-poetic-prose",
-      "definition": "Written in verse, or in prose with significant poetic/lyrical structure"
+      "definition": "Written in verse, or in prose with significant poetic/lyrical structure",
+      "key": "/tags/OL119T"
     }
   ]
 }

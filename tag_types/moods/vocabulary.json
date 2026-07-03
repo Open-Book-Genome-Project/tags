@@ -4,31 +4,161 @@
   "description": "The emotional resonance or vibe felt by the reader during or after the reading experience.",
   "controlled": true,
   "tags": [
-    { "tag": "Calm", "slug": "calm", "definition": "Peaceful, unhurried; the reading experience is serene and undemanding" },
-    { "tag": "Comical", "slug": "comical", "definition": "Frequently funny; lightness and humor punctuate the reading experience throughout" },
-    { "tag": "Confusing", "slug": "confusing", "definition": "Deliberately disorienting; the reader is meant to feel uncertain or lost" },
-    { "tag": "Cozy", "slug": "cozy", "definition": "Warm, safe, intimate; like reading by a fire with a hot drink" },
-    { "tag": "Dark", "slug": "dark", "definition": "Bleak or grim in tone; the world of the book offers little comfort" },
-    { "tag": "Depressing", "slug": "depressing", "definition": "The reading experience produces prolonged sadness or hopelessness" },
-    { "tag": "Disturbing", "slug": "disturbing", "definition": "Unsettling in a way that lingers; challenges the reader's sense of safety or normalcy" },
-    { "tag": "Exciting", "slug": "exciting", "definition": "Fast-paced and energetic; the reader feels propelled forward" },
-    { "tag": "Foreboding", "slug": "foreboding", "definition": "A pervasive sense that something terrible is coming; dread without immediate danger" },
-    { "tag": "Happy", "slug": "happy", "definition": "Joyful and optimistic; the dominant feeling is positive and light" },
-    { "tag": "Harrowing", "slug": "harrowing", "definition": "Intensely distressing; the reader is put through a difficult emotional experience" },
-    { "tag": "Humbling", "slug": "humbling", "definition": "The reading experience produces awe, smallness, or a sense of perspective" },
-    { "tag": "Inspiring", "slug": "inspiring", "definition": "Motivating and uplifting; the reader feels moved to act or believe" },
-    { "tag": "Intense", "slug": "intense", "definition": "High emotional or narrative pressure sustained throughout" },
-    { "tag": "Melancholic", "slug": "melancholic", "definition": "A sustained, gentle sadness; wistful rather than hopeless" },
-    { "tag": "Nostalgic", "slug": "nostalgic", "definition": "Evokes longing for a past time, place, or feeling" },
-    { "tag": "Overwhelming", "slug": "overwhelming", "definition": "The scale, emotion, or density of the book is almost too much to contain" },
-    { "tag": "Playful", "slug": "playful", "definition": "Light, inventive, and fun; the author and reader are in a game together" },
-    { "tag": "Sad", "slug": "sad", "definition": "Produces grief or sorrow; distinct from melancholic in its directness" },
-    { "tag": "Scary", "slug": "scary", "definition": "Produces active fear or fright during reading" },
-    { "tag": "Soapy", "slug": "soapy", "definition": "Dramatic, juicy, and full of interpersonal entanglements" },
-    { "tag": "Suspenseful", "slug": "suspenseful", "definition": "The reader is held in a state of tension and anticipation" },
-    { "tag": "Swoonworthy", "slug": "swoonworthy", "definition": "Produces delight, longing, or a pleasurable romantic ache" },
-    { "tag": "Thrilling", "slug": "thrilling", "definition": "Produces a rush of excitement or adrenaline" },
-    { "tag": "Uplifting", "slug": "uplifting", "definition": "Leaves the reader feeling hopeful, moved, or emotionally restored" },
-    { "tag": "Whimsical", "slug": "whimsical", "definition": "Playfully imaginative and fanciful; gently surreal" }
+    {
+      "tag": "Calm",
+      "slug": "calm",
+      "definition": "Peaceful, unhurried; the reading experience is serene and undemanding",
+      "key": "/tags/OL241T"
+    },
+    {
+      "tag": "Comical",
+      "slug": "comical",
+      "definition": "Frequently funny; lightness and humor punctuate the reading experience throughout",
+      "key": "/tags/OL242T"
+    },
+    {
+      "tag": "Confusing",
+      "slug": "confusing",
+      "definition": "Deliberately disorienting; the reader is meant to feel uncertain or lost",
+      "key": "/tags/OL243T"
+    },
+    {
+      "tag": "Cozy",
+      "slug": "cozy",
+      "definition": "Warm, safe, intimate; like reading by a fire with a hot drink",
+      "key": "/tags/OL244T"
+    },
+    {
+      "tag": "Dark",
+      "slug": "dark",
+      "definition": "Bleak or grim in tone; the world of the book offers little comfort",
+      "key": "/tags/OL245T"
+    },
+    {
+      "tag": "Depressing",
+      "slug": "depressing",
+      "definition": "The reading experience produces prolonged sadness or hopelessness",
+      "key": "/tags/OL246T"
+    },
+    {
+      "tag": "Disturbing",
+      "slug": "disturbing",
+      "definition": "Unsettling in a way that lingers; challenges the reader's sense of safety or normalcy",
+      "key": "/tags/OL247T"
+    },
+    {
+      "tag": "Exciting",
+      "slug": "exciting",
+      "definition": "Fast-paced and energetic; the reader feels propelled forward",
+      "key": "/tags/OL248T"
+    },
+    {
+      "tag": "Foreboding",
+      "slug": "foreboding",
+      "definition": "A pervasive sense that something terrible is coming; dread without immediate danger",
+      "key": "/tags/OL249T"
+    },
+    {
+      "tag": "Happy",
+      "slug": "happy",
+      "definition": "Joyful and optimistic; the dominant feeling is positive and light",
+      "key": "/tags/OL250T"
+    },
+    {
+      "tag": "Harrowing",
+      "slug": "harrowing",
+      "definition": "Intensely distressing; the reader is put through a difficult emotional experience",
+      "key": "/tags/OL251T"
+    },
+    {
+      "tag": "Humbling",
+      "slug": "humbling",
+      "definition": "The reading experience produces awe, smallness, or a sense of perspective",
+      "key": "/tags/OL252T"
+    },
+    {
+      "tag": "Inspiring",
+      "slug": "inspiring",
+      "definition": "Motivating and uplifting; the reader feels moved to act or believe",
+      "key": "/tags/OL253T"
+    },
+    {
+      "tag": "Intense",
+      "slug": "intense",
+      "definition": "High emotional or narrative pressure sustained throughout",
+      "key": "/tags/OL254T"
+    },
+    {
+      "tag": "Melancholic",
+      "slug": "melancholic",
+      "definition": "A sustained, gentle sadness; wistful rather than hopeless",
+      "key": "/tags/OL255T"
+    },
+    {
+      "tag": "Nostalgic",
+      "slug": "nostalgic",
+      "definition": "Evokes longing for a past time, place, or feeling",
+      "key": "/tags/OL256T"
+    },
+    {
+      "tag": "Overwhelming",
+      "slug": "overwhelming",
+      "definition": "The scale, emotion, or density of the book is almost too much to contain",
+      "key": "/tags/OL257T"
+    },
+    {
+      "tag": "Playful",
+      "slug": "playful",
+      "definition": "Light, inventive, and fun; the author and reader are in a game together",
+      "key": "/tags/OL258T"
+    },
+    {
+      "tag": "Sad",
+      "slug": "sad",
+      "definition": "Produces grief or sorrow; distinct from melancholic in its directness",
+      "key": "/tags/OL259T"
+    },
+    {
+      "tag": "Scary",
+      "slug": "scary",
+      "definition": "Produces active fear or fright during reading",
+      "key": "/tags/OL260T"
+    },
+    {
+      "tag": "Soapy",
+      "slug": "soapy",
+      "definition": "Dramatic, juicy, and full of interpersonal entanglements",
+      "key": "/tags/OL261T"
+    },
+    {
+      "tag": "Suspenseful",
+      "slug": "suspenseful",
+      "definition": "The reader is held in a state of tension and anticipation",
+      "key": "/tags/OL262T"
+    },
+    {
+      "tag": "Swoonworthy",
+      "slug": "swoonworthy",
+      "definition": "Produces delight, longing, or a pleasurable romantic ache",
+      "key": "/tags/OL263T"
+    },
+    {
+      "tag": "Thrilling",
+      "slug": "thrilling",
+      "definition": "Produces a rush of excitement or adrenaline",
+      "key": "/tags/OL264T"
+    },
+    {
+      "tag": "Uplifting",
+      "slug": "uplifting",
+      "definition": "Leaves the reader feeling hopeful, moved, or emotionally restored",
+      "key": "/tags/OL265T"
+    },
+    {
+      "tag": "Whimsical",
+      "slug": "whimsical",
+      "definition": "Playfully imaginative and fanciful; gently surreal",
+      "key": "/tags/OL266T"
+    }
   ]
 }

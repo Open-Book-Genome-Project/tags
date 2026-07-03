@@ -9,145 +9,244 @@
       "tag": "Apocalyptic",
       "slug": "apocalyptic",
       "definition": "The world is actively ending during the course of the narrative",
-      "parent_genres": ["Horror", "Sci-Fi", "Fantasy"]
+      "parent_genres": [
+        "Horror",
+        "Sci-Fi",
+        "Fantasy"
+      ],
+      "key": "/tags/OL267T"
     },
     {
       "tag": "Biopunk",
       "slug": "biopunk",
       "definition": "Focuses on biotechnology, genetic engineering, and body modification as the dominant technological framework",
-      "parent_genres": ["Sci-Fi"]
+      "parent_genres": [
+        "Sci-Fi"
+      ],
+      "key": "/tags/OL268T"
     },
     {
       "tag": "Cli-fi",
       "slug": "cli-fi",
       "definition": "Climate Fiction; structured around environmental collapse as the defining world-state",
-      "parent_genres": ["Sci-Fi", "Drama"]
+      "parent_genres": [
+        "Sci-Fi",
+        "Drama"
+      ],
+      "key": "/tags/OL269T"
     },
     {
       "tag": "Coming of Age",
       "slug": "coming-of-age",
       "definition": "Bildungsroman; the structural transition from youth to adult identity as the central arc",
-      "parent_genres": ["Drama", "Literary", "Romance", "Fantasy"]
+      "parent_genres": [
+        "Drama",
+        "Literary",
+        "Romance",
+        "Fantasy"
+      ],
+      "key": "/tags/OL270T"
     },
     {
       "tag": "Cult",
       "slug": "cult",
       "definition": "Works with transgressive structure and niche or subcultural appeal; often formally experimental",
-      "parent_genres": ["Literary", "Horror"]
+      "parent_genres": [
+        "Literary",
+        "Horror"
+      ],
+      "key": "/tags/OL271T"
     },
     {
       "tag": "Cyberpunk",
       "slug": "cyberpunk",
       "definition": "High-tech, low-life; digital networks and urban decay as the defining aesthetic and social framework",
-      "parent_genres": ["Sci-Fi"]
+      "parent_genres": [
+        "Sci-Fi"
+      ],
+      "key": "/tags/OL272T"
     },
     {
       "tag": "Detective",
       "slug": "detective",
       "definition": "Structured around the procedural journey of an investigator through a case",
-      "parent_genres": ["Mystery", "Crime"]
+      "parent_genres": [
+        "Mystery",
+        "Crime"
+      ],
+      "key": "/tags/OL273T"
     },
     {
       "tag": "Dystopian",
       "slug": "dystopian",
       "definition": "A world defined by oppressive or failed societal control as the structural baseline",
-      "parent_genres": ["Sci-Fi", "Fantasy"]
+      "parent_genres": [
+        "Sci-Fi",
+        "Fantasy"
+      ],
+      "key": "/tags/OL274T"
     },
     {
       "tag": "Epistolary",
       "slug": "epistolary",
       "definition": "Narrative constructed entirely from letters, diary entries, documents, or other written records",
-      "parent_genres": ["Drama", "Romance", "Horror"]
+      "parent_genres": [
+        "Drama",
+        "Romance",
+        "Horror"
+      ],
+      "key": "/tags/OL275T"
     },
     {
       "tag": "Epic",
       "slug": "epic",
       "definition": "Massive scope with high political, cosmic, or civilizational stakes; often in a secondary world",
-      "parent_genres": ["Fantasy", "Sci-Fi", "Historical"]
+      "parent_genres": [
+        "Fantasy",
+        "Sci-Fi",
+        "Historical"
+      ],
+      "key": "/tags/OL276T"
     },
     {
       "tag": "Espionage",
       "slug": "espionage",
       "definition": "Structured around intelligence operations, state secrets, and institutional betrayal",
-      "parent_genres": ["Thriller", "Crime"]
+      "parent_genres": [
+        "Thriller",
+        "Crime"
+      ],
+      "key": "/tags/OL277T"
     },
     {
       "tag": "Family Saga",
       "slug": "family-saga",
       "definition": "Multi-generational lineage and domestic history as the organizing spine",
-      "parent_genres": ["Drama", "Historical"]
+      "parent_genres": [
+        "Drama",
+        "Historical"
+      ],
+      "key": "/tags/OL278T"
     },
     {
       "tag": "Futurism",
       "slug": "futurism",
       "definition": "Grounded, near-future extrapolation focused on the next technological or social steps",
-      "parent_genres": ["Sci-Fi"]
+      "parent_genres": [
+        "Sci-Fi"
+      ],
+      "key": "/tags/OL279T"
     },
     {
       "tag": "Gonzo",
       "slug": "gonzo",
       "definition": "Subjective, chaotic, and author-centric; the narrator's own consciousness shapes the structure",
-      "parent_genres": ["Literary", "Humor"]
+      "parent_genres": [
+        "Literary",
+        "Humor"
+      ],
+      "key": "/tags/OL280T"
     },
     {
       "tag": "Gothic",
       "slug": "gothic",
       "definition": "Atmospheric decay, ancestral secrets, the sublime, and dread encoded in setting and architecture",
-      "parent_genres": ["Horror", "Romance", "Literary"]
+      "parent_genres": [
+        "Horror",
+        "Romance",
+        "Literary"
+      ],
+      "key": "/tags/OL281T"
     },
     {
       "tag": "Locked Room",
       "slug": "locked-room",
       "definition": "A pure logic puzzle; an impossible crime or situation that must be solved by reason alone",
-      "parent_genres": ["Mystery"]
+      "parent_genres": [
+        "Mystery"
+      ],
+      "key": "/tags/OL282T"
     },
     {
       "tag": "Melodrama",
       "slug": "melodrama",
       "definition": "Exaggerated plot and heightened emotional stakes; moral polarity between characters",
-      "parent_genres": ["Drama", "Romance"]
+      "parent_genres": [
+        "Drama",
+        "Romance"
+      ],
+      "key": "/tags/OL283T"
     },
     {
       "tag": "Picaresque",
       "slug": "picaresque",
       "definition": "Episodic adventures of a roguish, low-status protagonist navigating society's margins",
-      "parent_genres": ["Adventure", "Comedy"]
+      "parent_genres": [
+        "Adventure",
+        "Comedy"
+      ],
+      "key": "/tags/OL284T"
     },
     {
       "tag": "Post-Apocalyptic",
       "slug": "post-apocalyptic",
       "definition": "Structured around life and society as it rebuilds (or fails to) after a collapse has already occurred",
-      "parent_genres": ["Sci-Fi", "Horror", "Fantasy"]
+      "parent_genres": [
+        "Sci-Fi",
+        "Horror",
+        "Fantasy"
+      ],
+      "key": "/tags/OL285T"
     },
     {
       "tag": "Psychological",
       "slug": "psychological",
       "definition": "Internalized action; mental and emotional states drive plot more than external events",
-      "parent_genres": ["Thriller", "Horror", "Drama"]
+      "parent_genres": [
+        "Thriller",
+        "Horror",
+        "Drama"
+      ],
+      "key": "/tags/OL286T"
     },
     {
       "tag": "Space Opera",
       "slug": "space-opera",
       "definition": "Interstellar conflict, galactic politics, and large-scale adventure as the structural scope",
-      "parent_genres": ["Sci-Fi"]
+      "parent_genres": [
+        "Sci-Fi"
+      ],
+      "key": "/tags/OL287T"
     },
     {
       "tag": "Steampunk",
       "slug": "steampunk",
       "definition": "Retrofuturism built on 19th-century steam and mechanical technology as the dominant aesthetic",
-      "parent_genres": ["Sci-Fi", "Adventure", "Fantasy"]
+      "parent_genres": [
+        "Sci-Fi",
+        "Adventure",
+        "Fantasy"
+      ],
+      "key": "/tags/OL288T"
     },
     {
       "tag": "True Crime",
       "slug": "true-crime",
       "definition": "Structural retelling and investigation of real-world criminal events",
-      "parent_genres": ["Crime"]
+      "parent_genres": [
+        "Crime"
+      ],
+      "key": "/tags/OL289T"
     },
     {
       "tag": "Utopian",
       "slug": "utopian",
       "definition": "A world structured as an ideal or 'perfect' society, often used to critique the present",
-      "parent_genres": ["Sci-Fi", "Fantasy"]
+      "parent_genres": [
+        "Sci-Fi",
+        "Fantasy"
+      ],
+      "key": "/tags/OL290T"
     }
   ]
 }
