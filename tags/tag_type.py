@@ -18,10 +18,6 @@ from pathlib import Path
 from typing import Callable, Optional
 
 
-
-
-
-
 def normalize(subject: str) -> str:
     """Lowercase, strip, and NFC-normalize a subject string."""
     return unicodedata.normalize('NFC', subject.lower().strip())
