@@ -4,33 +4,173 @@
   "description": "Recognizable narrative devices, structural conventions, or character archetypes that recur across works.",
   "controlled": false,
   "tags": [
-    { "tag": "Antihero", "slug": "antihero", "definition": "A protagonist who lacks conventional heroic qualities; morally ambiguous or flawed" },
-    { "tag": "Chosen One", "slug": "chosen-one", "definition": "A protagonist prophesied or destined for a special role" },
-    { "tag": "Enemies to Lovers", "slug": "enemies-to-lovers", "definition": "A romantic arc that begins with hostility and transforms into love" },
-    { "tag": "Epistolary Structure", "slug": "epistolary-structure", "definition": "The narrative is constructed from letters, diary entries, or documents" },
-    { "tag": "Fake Identity", "slug": "fake-identity", "definition": "A character conceals or fabricates their identity for significant portions of the plot" },
-    { "tag": "False Death", "slug": "false-death", "definition": "A character appears to die but is later revealed to be alive" },
-    { "tag": "Femme Fatale", "slug": "femme-fatale", "definition": "A seductive, dangerous woman whose allure draws others into trouble" },
-    { "tag": "Forbidden Love", "slug": "forbidden-love", "definition": "A romantic relationship that is opposed by circumstance, society, or family" },
-    { "tag": "Found Family", "slug": "found-family", "definition": "A group of unrelated individuals who form deep familial bonds" },
-    { "tag": "Foundlings", "slug": "foundlings", "definition": "A protagonist of unknown parentage, often with a hidden identity or destiny" },
-    { "tag": "Frame Narrative", "slug": "frame-narrative", "definition": "A story-within-a-story; an outer narrative contains the central tale" },
-    { "tag": "Haunted Past", "slug": "haunted-past", "definition": "A character's present is shaped by trauma or secrets from their history" },
-    { "tag": "In Media Res", "slug": "in-media-res", "definition": "The narrative begins in the middle of the action, with backstory revealed later" },
-    { "tag": "Inheritance and Succession", "slug": "inheritance-and-succession", "definition": "Property, title, or power passing between generations drives the plot" },
-    { "tag": "Love Triangles", "slug": "love-triangles", "definition": "Three characters in overlapping romantic entanglements" },
-    { "tag": "MacGuffin", "slug": "macguffin", "definition": "An object or goal that motivates characters but has little intrinsic narrative importance" },
-    { "tag": "Mentor", "slug": "mentor", "definition": "A wise elder who guides the protagonist before departing or dying" },
-    { "tag": "Orphan Protagonist", "slug": "orphan-protagonist", "definition": "The main character has no living parents; their absence shapes the character's arc" },
-    { "tag": "Redemption Arc", "slug": "redemption-arc", "definition": "A morally compromised character works toward, achieves, or fails at redemption" },
-    { "tag": "Reverse Chronology", "slug": "reverse-chronology", "definition": "The story is told backwards; the ending is revealed first" },
-    { "tag": "Rival Turned Ally", "slug": "rival-turned-ally", "definition": "A former opponent becomes an ally or friend" },
-    { "tag": "Slow Burn", "slug": "slow-burn", "definition": "A romantic or narrative tension that builds gradually over a long arc" },
-    { "tag": "The Twist", "slug": "the-twist", "definition": "A major revelation that recontextualizes what the reader understood" },
-    { "tag": "Time Skip", "slug": "time-skip", "definition": "A significant period of in-story time is elided, skipping forward in the narrative" },
-    { "tag": "Trickster", "slug": "trickster", "definition": "A character who uses cunning, deception, or chaos to achieve goals" },
-    { "tag": "Unreliable Narrator", "slug": "unreliable-narrator", "definition": "The narrator's account is deliberately incomplete, biased, or self-deceiving" },
-    { "tag": "Villain with a Point", "slug": "villain-with-a-point", "definition": "The antagonist's worldview has genuine merit; the conflict is morally complex" },
-    { "tag": "Wicked Stepparent", "slug": "wicked-stepparent", "definition": "A step-parent who is actively hostile or cruel to the protagonist" }
+    {
+      "tag": "Antihero",
+      "slug": "antihero",
+      "definition": "A protagonist who lacks conventional heroic qualities; morally ambiguous or flawed",
+      "key": "/tags/OL214T"
+    },
+    {
+      "tag": "Chosen One",
+      "slug": "chosen-one",
+      "definition": "A protagonist prophesied or destined for a special role",
+      "key": "/tags/OL215T"
+    },
+    {
+      "tag": "Enemies to Lovers",
+      "slug": "enemies-to-lovers",
+      "definition": "A romantic arc that begins with hostility and transforms into love",
+      "key": "/tags/OL216T"
+    },
+    {
+      "tag": "Epistolary Structure",
+      "slug": "epistolary-structure",
+      "definition": "The narrative is constructed from letters, diary entries, or documents",
+      "key": "/tags/OL217T"
+    },
+    {
+      "tag": "Fake Identity",
+      "slug": "fake-identity",
+      "definition": "A character conceals or fabricates their identity for significant portions of the plot",
+      "key": "/tags/OL218T"
+    },
+    {
+      "tag": "False Death",
+      "slug": "false-death",
+      "definition": "A character appears to die but is later revealed to be alive",
+      "key": "/tags/OL219T"
+    },
+    {
+      "tag": "Femme Fatale",
+      "slug": "femme-fatale",
+      "definition": "A seductive, dangerous woman whose allure draws others into trouble",
+      "key": "/tags/OL220T"
+    },
+    {
+      "tag": "Forbidden Love",
+      "slug": "forbidden-love",
+      "definition": "A romantic relationship that is opposed by circumstance, society, or family",
+      "key": "/tags/OL221T"
+    },
+    {
+      "tag": "Found Family",
+      "slug": "found-family",
+      "definition": "A group of unrelated individuals who form deep familial bonds",
+      "key": "/tags/OL222T"
+    },
+    {
+      "tag": "Foundlings",
+      "slug": "foundlings",
+      "definition": "A protagonist of unknown parentage, often with a hidden identity or destiny",
+      "key": "/tags/OL223T"
+    },
+    {
+      "tag": "Frame Narrative",
+      "slug": "frame-narrative",
+      "definition": "A story-within-a-story; an outer narrative contains the central tale",
+      "key": "/tags/OL224T"
+    },
+    {
+      "tag": "Haunted Past",
+      "slug": "haunted-past",
+      "definition": "A character's present is shaped by trauma or secrets from their history",
+      "key": "/tags/OL225T"
+    },
+    {
+      "tag": "In Media Res",
+      "slug": "in-media-res",
+      "definition": "The narrative begins in the middle of the action, with backstory revealed later",
+      "key": "/tags/OL226T"
+    },
+    {
+      "tag": "Inheritance and Succession",
+      "slug": "inheritance-and-succession",
+      "definition": "Property, title, or power passing between generations drives the plot",
+      "key": "/tags/OL227T"
+    },
+    {
+      "tag": "Love Triangles",
+      "slug": "love-triangles",
+      "definition": "Three characters in overlapping romantic entanglements",
+      "key": "/tags/OL228T"
+    },
+    {
+      "tag": "MacGuffin",
+      "slug": "macguffin",
+      "definition": "An object or goal that motivates characters but has little intrinsic narrative importance",
+      "key": "/tags/OL229T"
+    },
+    {
+      "tag": "Mentor",
+      "slug": "mentor",
+      "definition": "A wise elder who guides the protagonist before departing or dying",
+      "key": "/tags/OL230T"
+    },
+    {
+      "tag": "Orphan Protagonist",
+      "slug": "orphan-protagonist",
+      "definition": "The main character has no living parents; their absence shapes the character's arc",
+      "key": "/tags/OL231T"
+    },
+    {
+      "tag": "Redemption Arc",
+      "slug": "redemption-arc",
+      "definition": "A morally compromised character works toward, achieves, or fails at redemption",
+      "key": "/tags/OL232T"
+    },
+    {
+      "tag": "Reverse Chronology",
+      "slug": "reverse-chronology",
+      "definition": "The story is told backwards; the ending is revealed first",
+      "key": "/tags/OL233T"
+    },
+    {
+      "tag": "Rival Turned Ally",
+      "slug": "rival-turned-ally",
+      "definition": "A former opponent becomes an ally or friend",
+      "key": "/tags/OL234T"
+    },
+    {
+      "tag": "Slow Burn",
+      "slug": "slow-burn",
+      "definition": "A romantic or narrative tension that builds gradually over a long arc",
+      "key": "/tags/OL235T"
+    },
+    {
+      "tag": "The Twist",
+      "slug": "the-twist",
+      "definition": "A major revelation that recontextualizes what the reader understood",
+      "key": "/tags/OL236T"
+    },
+    {
+      "tag": "Time Skip",
+      "slug": "time-skip",
+      "definition": "A significant period of in-story time is elided, skipping forward in the narrative",
+      "key": "/tags/OL291T"
+    },
+    {
+      "tag": "Trickster",
+      "slug": "trickster",
+      "definition": "A character who uses cunning, deception, or chaos to achieve goals",
+      "key": "/tags/OL237T"
+    },
+    {
+      "tag": "Unreliable Narrator",
+      "slug": "unreliable-narrator",
+      "definition": "The narrator's account is deliberately incomplete, biased, or self-deceiving",
+      "key": "/tags/OL238T"
+    },
+    {
+      "tag": "Villain with a Point",
+      "slug": "villain-with-a-point",
+      "definition": "The antagonist's worldview has genuine merit; the conflict is morally complex",
+      "key": "/tags/OL239T"
+    },
+    {
+      "tag": "Wicked Stepparent",
+      "slug": "wicked-stepparent",
+      "definition": "A step-parent who is actively hostile or cruel to the protagonist",
+      "key": "/tags/OL240T"
+    }
   ]
 }

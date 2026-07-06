@@ -7,92 +7,110 @@
     {
       "tag": "Abuse (emotional)",
       "slug": "abuse-emotional",
-      "definition": "Sustained depiction of psychological or emotional abuse between characters"
+      "definition": "Sustained depiction of psychological or emotional abuse between characters",
+      "key": "/tags/OL144T"
     },
     {
       "tag": "Abuse (physical)",
       "slug": "abuse-physical",
-      "definition": "Sustained depiction of physical abuse, battery, or bodily harm between characters"
+      "definition": "Sustained depiction of physical abuse, battery, or bodily harm between characters",
+      "key": "/tags/OL145T"
     },
     {
       "tag": "Abuse (sexual)",
       "slug": "abuse-sexual",
-      "definition": "Depiction of sexual abuse or molestation"
+      "definition": "Depiction of sexual abuse or molestation",
+      "key": "/tags/OL146T"
     },
     {
       "tag": "Addiction / Substance use",
       "slug": "addiction-substance-use",
-      "definition": "Depiction of addiction, substance dependency, or significant drug/alcohol misuse"
+      "definition": "Depiction of addiction, substance dependency, or significant drug/alcohol misuse",
+      "key": "/tags/OL147T"
     },
     {
       "tag": "Animal harm",
       "slug": "animal-harm",
-      "definition": "Depiction of cruelty to, torture of, or graphic death of animals"
+      "definition": "Depiction of cruelty to, torture of, or graphic death of animals",
+      "key": "/tags/OL148T"
     },
     {
       "tag": "Child death",
       "slug": "child-death",
-      "definition": "Death of a child depicted on or near the page"
+      "definition": "Death of a child depicted on or near the page",
+      "key": "/tags/OL149T"
     },
     {
       "tag": "Domestic violence",
       "slug": "domestic-violence",
-      "definition": "Depiction of violence within intimate or family relationships"
+      "definition": "Depiction of violence within intimate or family relationships",
+      "key": "/tags/OL150T"
     },
     {
       "tag": "Eating disorders",
       "slug": "eating-disorders",
-      "definition": "Depiction of disordered eating, anorexia, bulimia, or related conditions"
+      "definition": "Depiction of disordered eating, anorexia, bulimia, or related conditions",
+      "key": "/tags/OL151T"
     },
     {
       "tag": "Graphic violence",
       "slug": "graphic-violence",
-      "definition": "Detailed, explicit depictions of physical violence, gore, or bodily harm"
+      "definition": "Detailed, explicit depictions of physical violence, gore, or bodily harm",
+      "key": "/tags/OL152T"
     },
     {
       "tag": "Homophobia / Transphobia",
       "slug": "homophobia-transphobia",
-      "definition": "Significant depiction of anti-LGBTQ+ discrimination, slurs, or violence"
+      "definition": "Significant depiction of anti-LGBTQ+ discrimination, slurs, or violence",
+      "key": "/tags/OL153T"
     },
     {
       "tag": "Racism / Racial slurs",
       "slug": "racism-racial-slurs",
-      "definition": "Significant depiction of racism, racial violence, or use of racial slurs"
+      "definition": "Significant depiction of racism, racial violence, or use of racial slurs",
+      "key": "/tags/OL154T"
     },
     {
       "tag": "Self-harm",
       "slug": "self-harm",
-      "definition": "Depiction of self-inflicted injury or self-destructive behavior"
+      "definition": "Depiction of self-inflicted injury or self-destructive behavior",
+      "key": "/tags/OL155T"
     },
     {
       "tag": "Sexual assault",
       "slug": "sexual-assault",
-      "definition": "Depiction of rape or sexual assault"
+      "definition": "Depiction of rape or sexual assault",
+      "key": "/tags/OL156T"
     },
     {
       "tag": "Sexual content (explicit)",
       "slug": "sexual-content-explicit",
-      "definition": "Explicit, graphic sexual content"
+      "definition": "Explicit, graphic sexual content",
+      "key": "/tags/OL157T"
     },
     {
       "tag": "Slavery",
       "slug": "slavery",
-      "definition": "Depiction of chattel slavery and its conditions"
+      "definition": "Depiction of chattel slavery and its conditions",
+      "key": "/tags/OL158T"
     },
     {
       "tag": "Suicide",
       "slug": "suicide",
-      "definition": "Depiction of suicide or suicide attempts"
+      "definition": "Depiction of suicide or suicide attempts",
+      "key": "/tags/OL159T"
     },
     {
       "tag": "Torture",
       "slug": "torture",
-      "definition": "Depiction of deliberate infliction of severe pain or suffering"
+      "definition": "Depiction of deliberate infliction of severe pain or suffering",
+      "key": "/tags/OL160T"
     },
     {
       "tag": "War violence",
       "slug": "war-violence",
-      "definition": "Graphic depiction of combat, casualties, or atrocities of war"
+      "definition": "Graphic depiction of combat, casualties, or atrocities of war",
+      "key": "/tags/OL161T"
     }
   ]
 }
