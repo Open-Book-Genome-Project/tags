@@ -6,8 +6,10 @@ Usage:
 """
 
 import json
-import sys
 from pathlib import Path
+import logging
+
+logger = logging.getLogger(__name__)
 
 from tags.utils import slug_to_tag_key
 
@@ -62,6 +64,11 @@ class WorkMigrator:
         return {k: v for k, v in result.items() if v}
 
 if __name__ ==  "__main__":
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(message)s",
+    )
+    
     import argparse
     import requests
 
@@ -75,7 +82,7 @@ if __name__ ==  "__main__":
 
     # Remove /works/ prefix if present, then fetch work JSON from Open Library
     work_id = args.work.replace("works/", "")
-    resp = requests.get(f"http://openlibrary.org/works/{work_id}.json")
+    resp = requests.get(f"https://openlibrary.org/works/{work_id}.json")
     resp.raise_for_status()
     work = resp.json()
 
@@ -88,11 +95,11 @@ if __name__ ==  "__main__":
 
     if args.dry_run:
         # Print results in a human friendly format
-        print(f"\n=== {work_id}: {title} ===") # Added the title here just to confirm the book name
+        logger.info(f"\n=== {work_id}: {title} ===") # Added the title here just to confirm the book name
         for tag_type, keys in result.items():
-            print(f"  {tag_type}:")
+            logger.info(f"  {tag_type}:")
             for k in keys:
-                print(f"   - {k}")
+                logger.info(f"   - {k}")
     else:
         # Output raw JSON (for piping to other tools)
         print(json.dumps(result, indent=2))
