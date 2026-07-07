@@ -89,7 +89,7 @@ def phase2(keys_path: str, tag_type: str, dry_run: bool, batch_size: int = 50):
     Read work keys from Phase 1 output (one per line).
     For each work:
         1. Fetch its JSON from the OL API
-        2. Run our migrartor to compute which Tag keys apply
+        2. Run our migrator to compute which Tag keys apply
         3. If not dry-run: set the typed field and save via save_many()
         4. If dry-run: just print what would change
     """
