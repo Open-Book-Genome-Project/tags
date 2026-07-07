@@ -17,7 +17,15 @@ import argparse
 import gzip
 import json
 import sys
+import logging
 from pathlib import Path
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(message)s",
+)
+
+logger = logging.getLogger(__name__)
 
 import requests
 from olclient.openlibrary import OpenLibrary
@@ -27,11 +35,6 @@ from olclient.config import Config, Credentials
 # sys.path.insert lets us import from scripts/ even when running from repo root
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from scripts.migrate_work import WorkMigrator
-
-# How many works to send in each save_many() batch
-# 50 is a safe starting point - large enough to be effiecient,
-# small enough to avoid timeouts
-BATCH_SIZE = 50
 
 #---------------------------------------------------------------------------
 # Phase 1 - Scan dump for matched work keys
@@ -71,17 +74,17 @@ def phase1(dump_path: str, tag_type: str):
                     matched += 1
                     break
 
-            # Periodic progress update to stderr (doesn't pollute stdout)
+            # Periodic progress update
             if total % 100000 == 0:
-                print(f". Scanned {total}, matched {matched}", file=sys.stderr)
+                logger.info(f"Scanned {total}, matched {matched}")
 
-    print(f"Done: scanned {total}, matched {matched} works", file=sys.stderr)
+    logger.info(f"Done: Scanned {total}, matched {matched} works")
 
 
 #---------------------------------------------------------------------------
 # Phase 2 - Fetch,. migrate, save
 # ---------------------------------------------------------------------------
-def phase2(keys_path: str, tag_type: str, dry_run: bool):
+def phase2(keys_path: str, tag_type: str, dry_run: bool, batch_size: int = 50):
     """
     Read work keys from Phase 1 output (one per line).
     For each work:
@@ -109,7 +112,7 @@ def phase2(keys_path: str, tag_type: str, dry_run: bool):
             resp.raise_for_status()
             work = resp.json()
         except Exception as e:
-            print(f"  Error fetching {key}: {e}", file=sys.stderr)
+            logger.error(f"Error fetching {key}: {e}")
             continue
 
         # Run the migrator - returns {} if nothing matched
@@ -118,8 +121,8 @@ def phase2(keys_path: str, tag_type: str, dry_run: bool):
             continue
 
         if dry_run:
-            # Preview mode: just print what we would write
-            print(f"{key}: {tag_type} = {tag_keys}")
+            # Preview mode: log what we would write
+            logger.info(f"{key}: {tag_type} = {tag_keys}")
             continue
 
         # Set the typed field (e.g work["genres"] = ["tags/OL179T"])
@@ -127,17 +130,17 @@ def phase2(keys_path: str, tag_type: str, dry_run: bool):
         batch.append(work)
 
         # Save in batches - save_many() with the OpenLibrary session
-        if len(batch) >= BATCH_SIZE:
+        if len(batch) >= batch_size:
             r = ol.save_many(batch, f"backfill {tag_type} tags from subject mapping")
             if r.status_code == 200:
                 updated += len(batch)
             else:
-                print(f"  save_many error: {r.status_code} {r.text[:200]}", file=sys.stderr)
+                logger.error(f"save_many error: {r.status_code} {r.text[:200]}")
             batch = []
 
         # Periodic progress update
         if (i + 1) % 1000 == 0:
-            print(f"  Processed {i + 1}/{total}", file=sys.stderr)
+            logger.info(f"Processed {i+1}/{total}")
 
     # Flush any remaining works in the last batch
     if batch and not dry_run:
@@ -145,7 +148,7 @@ def phase2(keys_path: str, tag_type: str, dry_run: bool):
         if r.status_code == 200:
             updated += len(batch)
 
-    print(f"Done: {updated} works updated with {tag_type} tags", file=sys.stderr)
+    logger.info(f"Done: {updated} works updated with {tag_type} tags")
 
 
 #---------------------------------------------------------------------------
@@ -163,6 +166,7 @@ def main():
     parser = argparse.ArgumentParser(description="Backfill typed Tag keys from subject strings")
     parser.add_argument("--type", default="genres", help="Tag type to backfill (default: genres)")
     parser.add_argument("--dry-run", action="store_true", help="Preview changes without writing")
+    parser.add_argument("--batch-size", type=int, default=50, help="works per save_many (batch: 50)")
 
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument("--dump", help="Path to OL works dump (.txt.gz)")
@@ -173,7 +177,7 @@ def main():
     if args.dump:
         phase1(args.dump, args.type)
     else:
-        phase2(args.keys, args.type, args.dry_run)
+        phase2(args.keys, args.type, args.dry_run, args.batch_size)
 
 
 if __name__ == "__main__":
