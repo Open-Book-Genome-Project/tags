@@ -18,6 +18,7 @@ import gzip
 import json
 import sys
 import logging
+import requests
 from pathlib import Path
 
 logging.basicConfig(
@@ -27,23 +28,20 @@ logging.basicConfig(
 
 logger = logging.getLogger(__name__)
 
-import requests
-from olclient.openlibrary import OpenLibrary
-from olclient.config import Config, Credentials
-
-# Import our migrator from the sibling module
 # sys.path.insert lets us import from scripts/ even when running from repo root
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from scripts.migrate_work import WorkMigrator
+from tags.utils import get_ol_session
+
 
 #---------------------------------------------------------------------------
 # Phase 1 - Scan dump for matched work keys
 # ---------------------------------------------------------------------------
-def phase1(dump_path: str, tag_type: str):
+def scan_dump_for_matched_keys(dump_path: str, tag_type: str):
     """
-        Read a gzipped OL works dump line by line.
-        For each work, check its subjects against our mappings.
-        If any subject matches, print the work's key (e.g. )
+    Read a gzipped OL works dump line by line.
+    For each work, check its subjects against our mappings.
+    If any subject matches, print the work's key (e.g. /works/OL82563W).
     """
 
     migrator = WorkMigrator()
@@ -54,7 +52,7 @@ def phase1(dump_path: str, tag_type: str):
         for line in f:
             total += 1
 
-            # OL dump format: tab-seperated, 3rd field is the JSON
+            # OL dump format: tab-separated, 3rd field is the JSON
             parts = line.split("\t")
             if len(parts) < 3:
                 continue
@@ -82,9 +80,9 @@ def phase1(dump_path: str, tag_type: str):
 
 
 #---------------------------------------------------------------------------
-# Phase 2 - Fetch,. migrate, save
+# Phase 2 - Fetch, migrate, save
 # ---------------------------------------------------------------------------
-def phase2(keys_path: str, tag_type: str, dry_run: bool, batch_size: int = 50):
+def backfill_tag_keys(keys_path: str, tag_type: str, dry_run: bool, batch_size: int = 50):
     """
     Read work keys from Phase 1 output (one per line).
     For each work:
@@ -93,12 +91,8 @@ def phase2(keys_path: str, tag_type: str, dry_run: bool, batch_size: int = 50):
         3. If not dry-run: set the typed field and save via save_many()
         4. If dry-run: just print what would change
     """
-    # Authenticate as the bot account using s3 keys from ~/.config/ol.ini
-    cfg = Config().get_config()
-    s3 = cfg["s3"]
-    ol = OpenLibrary(credentials=Credentials(access=s3[0], secret=s3[1]))
-    ol.session.headers.update({"Content-Type": "application/json"})
-
+    # Authenticate as the bot account using S3 keys from ~/.config/ol.ini
+    ol = get_ol_session()
     migrator = WorkMigrator()
     keys = [line.strip() for line in open(keys_path) if line.strip()]
     total = len(keys)
@@ -125,7 +119,7 @@ def phase2(keys_path: str, tag_type: str, dry_run: bool, batch_size: int = 50):
             logger.info(f"{key}: {tag_type} = {tag_keys}")
             continue
 
-        # Set the typed field (e.g work["genres"] = ["tags/OL179T"])
+        # Set the typed field (e.g work["genres"] = ["/tags/OL179T"])
         work[tag_type] = tag_keys
         batch.append(work)
 
@@ -175,9 +169,9 @@ def main():
     args = parser.parse_args()
 
     if args.dump:
-        phase1(args.dump, args.type)
+        scan_dump_for_matched_keys(args.dump, args.type)
     else:
-        phase2(args.keys, args.type, args.dry_run, args.batch_size)
+        backfill_tag_keys(args.keys, args.type, args.dry_run, args.batch_size)
 
 
 if __name__ == "__main__":

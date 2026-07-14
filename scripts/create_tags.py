@@ -12,8 +12,11 @@ import json
 import os
 import glob
 import time
-from olclient.openlibrary import OpenLibrary
-from olclient.config import Config, Credentials
+
+from tags.utils import get_ol_session
+
+# Authenticate as the bot account using S3 keys from ~/.config/ol.ini
+ol = get_ol_session()
 
 # Path to the tag_types/ directory (one level up from scripts/)
 TAG_TYPES_DIR = os.path.join(os.path.dirname(__file__), "..", "tag_types")
@@ -24,13 +27,6 @@ CONTROLLED_TYPES = [
     "literary_tropes", "literary_form", "content_warnings",
     "content_formats", "audience", "content_features",
 ]
-
-# Authenticate as openlibrarytagsbot using S3 keys from ~/.config/ol.ini
-cfg = Config().get_config()
-s3 = cfg["s3"]
-ol = OpenLibrary(credentials=Credentials(access=s3[0], secret=s3[1]))
-ol.session.headers.update({"Content-Type": "application/json"})
-
 
 def create_tag(name, tag_type, slug, description):
     """
@@ -45,7 +41,6 @@ def create_tag(name, tag_type, slug, description):
         "tag_description": description,
     }])
     headers = {
-        "Content-Type": "application/json",
         "Opt": '"http://openlibrary.org/dev/docs/api"; ns=42',
         "42-comment": f"create tag: {slug} ({tag_type})",
     }
