@@ -66,7 +66,8 @@ def scan_dump_for_matched_keys(dump_path: str, tag_type: str):
             # Check each subject against our mappings
             subjects = work.get("subjects", [])
             for s in subjects:
-                if migrator.classify_subject(s):
+                result = migrator.classify_subject(s)
+                if result and result[0] == tag_type :
                     # Found a match - output the work key and move on
                     print(parts[1].strip())
                     matched += 1
