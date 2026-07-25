@@ -52,21 +52,22 @@ def scan_dump_for_matched_keys(dump_path: str, tag_type: str):
         for line in f:
             total += 1
 
-            # OL dump format: tab-separated, 3rd field is the JSON
+            # OL dump format: tab-separated, 5th field is the JSON
             parts = line.split("\t")
             if len(parts) < 3:
                 continue
 
             # Parse the work JSON
             try:
-                work = json.loads(parts[2])
+                work = json.loads(parts[4])
             except json.JSONDecodeError:
                 continue
 
             # Check each subject against our mappings
             subjects = work.get("subjects", [])
             for s in subjects:
-                if migrator.classify_subject(s):
+                result = migrator.classify_subject(s)
+                if result and result[0] == tag_type :
                     # Found a match - output the work key and move on
                     print(parts[1].strip())
                     matched += 1
