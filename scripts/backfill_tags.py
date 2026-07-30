@@ -17,6 +17,7 @@ import argparse
 import gzip
 import json
 import sys
+import time
 import logging
 import requests
 from pathlib import Path
@@ -83,7 +84,7 @@ def scan_dump_for_matched_keys(dump_path: str, tag_type: str):
 #---------------------------------------------------------------------------
 # Phase 2 - Fetch, migrate, save
 # ---------------------------------------------------------------------------
-def backfill_tag_keys(keys_path: str, tag_type: str, dry_run: bool, batch_size: int = 50):
+def backfill_tag_keys(keys_path: str, tag_type: str, dry_run: bool, batch_size: int = 50, delay: float = 0.5):
     """
     Read work keys from Phase 1 output (one per line).
     For each work:
@@ -137,6 +138,10 @@ def backfill_tag_keys(keys_path: str, tag_type: str, dry_run: bool, batch_size: 
         if (i + 1) % 1000 == 0:
             logger.info(f"Processed {i+1}/{total}")
 
+        # Throttle to avoid rate limiting
+        if not dry_run:
+            time.sleep(delay)
+
     # Flush any remaining works in the last batch
     if batch and not dry_run:
         r = ol.save_many(batch, f"backfill {tag_type} tags from subject mapping")
@@ -162,6 +167,7 @@ def main():
     parser.add_argument("--type", default="genres", help="Tag type to backfill (default: genres)")
     parser.add_argument("--dry-run", action="store_true", help="Preview changes without writing")
     parser.add_argument("--batch-size", type=int, default=50, help="works per save_many (batch: 50)")
+    parser.add_argument("--delay", type=float, default=0.5, help="Seconds between API requests (default: 0.5)")
 
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument("--dump", help="Path to OL works dump (.txt.gz)")
@@ -172,7 +178,7 @@ def main():
     if args.dump:
         scan_dump_for_matched_keys(args.dump, args.type)
     else:
-        backfill_tag_keys(args.keys, args.type, args.dry_run, args.batch_size)
+        backfill_tag_keys(args.keys, args.type, args.dry_run, args.batch_size, args.delay)
 
 
 if __name__ == "__main__":
