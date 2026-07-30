@@ -84,7 +84,7 @@ def scan_dump_for_matched_keys(dump_path: str, tag_type: str):
 #---------------------------------------------------------------------------
 # Phase 2 - Fetch, migrate, save
 # ---------------------------------------------------------------------------
-def backfill_tag_keys(keys_path: str, tag_type: str, dry_run: bool, batch_size: int = 50, delay: float = 0.5):
+def backfill_tag_keys(keys_path: str, tag_type: str, dry_run: bool, batch_size: int = 100, delay: float = 1.0):
     """
     Read work keys from Phase 1 output (one per line).
     For each work:
@@ -166,8 +166,8 @@ def main():
     parser = argparse.ArgumentParser(description="Backfill typed Tag keys from subject strings")
     parser.add_argument("--type", default="genres", help="Tag type to backfill (default: genres)")
     parser.add_argument("--dry-run", action="store_true", help="Preview changes without writing")
-    parser.add_argument("--batch-size", type=int, default=50, help="works per save_many (batch: 50)")
-    parser.add_argument("--delay", type=float, default=0.5, help="Seconds between API requests (default: 0.5)")
+    parser.add_argument("--batch-size", type=int, default=100, help="works per save_many (batch: 100)")
+    parser.add_argument("--delay", type=float, default=1.0, help="Seconds between API requests (default: 1.0)")
 
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument("--dump", help="Path to OL works dump (.txt.gz)")
