@@ -78,6 +78,25 @@ def record_keys(path: str, keys: list) -> None:
         for k in keys:
             f.write(k + "\n")
 
+def remove_keys(path: str, keys: set) -> int:
+    """
+    Remove the given keys from a log file, rewriting the file with the rest.
+    Returns how many lines were removed (0 if there was nothing to do).
+    """
+    if not keys or not Path(path).exists():
+        return 0
+    with open(path) as f:
+        kept = []
+        removed = 0
+        for line in f:
+            if line.strip() in keys:
+                removed += 1
+            else:
+                kept.append(line)
+    if removed:
+        with open(path, "w") as f:
+            f.writelines(kept)
+    return removed
 
 def flush_batch(ol, batch: list, comment: str, flushed_log: str, failed_log: str) -> int:
     """
@@ -89,6 +108,7 @@ def flush_batch(ol, batch: list, comment: str, flushed_log: str, failed_log: str
         r = save_many_dicts(ol, batch, comment)
         if r.status_code == 200:
             record_keys(flushed_log, [w["key"] for w in batch])
+            remove_keys(failed_log, {w["key"] for w in batch})
             return len(batch)
         wait = 30 * (attempt + 1)           # wait 30s, then 60s
         logger.warning(f"save_many returned {r.status_code}; waiting {wait}s and retrying ({attempt + 1}/3)")
@@ -173,6 +193,12 @@ def backfill_tag_keys(keys_path: str, tag_type: str, dry_run: bool, batch_size: 
     if resume and Path(flushed_log).exists():
         already_flushed = set(line.strip() for line in open(flushed_log) if line.strip())
         logger.info(f"Resume mode: {len(already_flushed)} works already flushed; skipping them")
+
+    # Prune the failed log of keys that already flushed: a key in both logs is done.
+    if already_flushed:
+        pruned = remove_keys(failed_log, already_flushed)
+        if pruned:
+            logger.info(f"Pruned {pruned} already-flushed entries from {failed_log}")
 
     updated = 0
     skipped = 0
