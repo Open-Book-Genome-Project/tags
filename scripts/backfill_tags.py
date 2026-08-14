@@ -70,13 +70,21 @@ def fetch_work(key: str, retries: int = 3) -> dict | None:
     return None
 
 
-def record_keys(path: str, keys: list) -> None:
+def record_keys(path: str, keys: list, unique: bool = False) -> None:
     """
     Write a list of work keys to a file (one per line), appending to it.
+    With unique=True, skip keys already present in the file.
     """
+    existing = set()
+    if unique and Path(path).exists():
+        existing = set(line.strip() for line in open(path) if line.strip())
     with open(path, "a") as f:
         for k in keys:
+            if unique and k in existing:
+                continue
             f.write(k + "\n")
+            existing.add(k)
+
 
 def remove_keys(path: str, keys: set) -> int:
     """
@@ -113,7 +121,7 @@ def flush_batch(ol, batch: list, comment: str, flushed_log: str, failed_log: str
         wait = 30 * (attempt + 1)           # wait 30s, then 60s
         logger.warning(f"save_many returned {r.status_code}; waiting {wait}s and retrying ({attempt + 1}/3)")
         time.sleep(wait)
-    record_keys(failed_log, [w["key"] for w in batch])
+    record_keys(failed_log, [w["key"] for w in batch], unique=True)
     logger.error(f"save_many failed for {len(batch)} works: {r.status_code} {r.text[:200]}. Keys recorded in {failed_log}")
     return 0
 
@@ -217,7 +225,7 @@ def backfill_tag_keys(keys_path: str, tag_type: str, dry_run: bool, batch_size: 
             work = fetch_work(key, fetch_retries)
             if work is None:
                 fetch_failures += 1
-                record_keys(failed_log, [key])
+                record_keys(failed_log, [key], unique=True)
                 continue
 
             # Run the migrator - returns {} if nothing matched
