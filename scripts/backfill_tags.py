@@ -34,6 +34,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from scripts.migrate_work import WorkMigrator
 from tags.utils import get_ol_session
 
+FETCH_TIMEOUT = 30   # seconds for fetching a single work JSON
+SAVE_TIMEOUT = 60    # seconds for the save_many POST (matches OL batch-script convention)
 
 #---------------------------------------------------------------------------
 # Phase 2 helpers - fetch one work, record keys, flush a batch, POST raw dicts
@@ -48,7 +50,7 @@ def save_many_dicts(ol, batch, comment):
         '42-comment': comment,
     }
     return ol.session.post(
-        f"{ol.base_url}/api/save_many", json.dumps(batch), headers=headers
+        f"{ol.base_url}/api/save_many", json.dumps(batch), headers=headers, timeout=SAVE_TIMEOUT
     )
 
 
@@ -59,7 +61,7 @@ def fetch_work(key: str, retries: int = 3) -> dict | None:
     """
     for attempt in range(retries):
         try:
-            resp = requests.get(f"https://openlibrary.org{key}.json")
+            resp = requests.get(f"https://openlibrary.org{key}.json", timeout=FETCH_TIMEOUT)
             resp.raise_for_status()
             return resp.json()
         except Exception as e:
@@ -106,23 +108,41 @@ def remove_keys(path: str, keys: set) -> int:
             f.writelines(kept)
     return removed
 
+
 def flush_batch(ol, batch: list, comment: str, flushed_log: str, failed_log: str) -> int:
     """
     Send one group of works to Open Library, retrying briefly if the server is busy or blocks us.
     On success the works' keys go to the flushed log; on failure they go to the failed log for
     a later retry. Returns how many saved.
     """
-    for attempt in range(3):
-        r = save_many_dicts(ol, batch, comment)
+    last_error = None                        # remember the last failure for the final log line
+    for attempt in range(3):                 # up to 3 tries per batch
+        try:
+            r = save_many_dicts(ol, batch, comment)
+        except Exception as e:
+            # Network-level failure (dropped connection, timeout): treat like a non-200
+            # response -- back off and retry instead of letting it crash the whole run.
+            last_error = str(e)
+            wait = 30 * (attempt + 1)        # wait 30s, then 60s
+            logger.warning(f"save_many raised {e}; waiting {wait}s and retrying ({attempt + 1}/3)")
+            time.sleep(wait)
+            continue
+
         if r.status_code == 200:
+            # Success: mark the works flushed and clear any stale failed-log entries.
             record_keys(flushed_log, [w["key"] for w in batch])
             remove_keys(failed_log, {w["key"] for w in batch})
             return len(batch)
-        wait = 30 * (attempt + 1)           # wait 30s, then 60s
+
+        # HTTP-level failure (4xx/5xx, e.g. a WAF 403): save the details, back off, retry.
+        last_error = f"HTTP {r.status_code}: {r.text[:200]}"
+        wait = 30 * (attempt + 1)            # wait 30s, then 60s
         logger.warning(f"save_many returned {r.status_code}; waiting {wait}s and retrying ({attempt + 1}/3)")
         time.sleep(wait)
+
+    # All attempts failed: park the keys in the failed log for a later retry (--keys + resume).
     record_keys(failed_log, [w["key"] for w in batch], unique=True)
-    logger.error(f"save_many failed for {len(batch)} works: {r.status_code} {r.text[:200]}. Keys recorded in {failed_log}")
+    logger.error(f"save_many failed for {len(batch)} works: {last_error}. Keys recorded in {failed_log}")
     return 0
 
 
@@ -225,7 +245,7 @@ def backfill_tag_keys(keys_path: str, tag_type: str, dry_run: bool, batch_size: 
             work = fetch_work(key, fetch_retries)
             if work is None:
                 fetch_failures += 1
-                record_keys(failed_log, [key], unique=True)
+                record_keys(failed_log, [key],)
                 continue
 
             # Run the migrator - returns {} if nothing matched
