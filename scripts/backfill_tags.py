@@ -40,20 +40,6 @@ SAVE_TIMEOUT = 60    # seconds for the save_many POST (matches OL batch-script c
 #---------------------------------------------------------------------------
 # Phase 2 helpers - fetch one work, record keys, flush a batch, POST raw dicts
 # ---------------------------------------------------------------------------
-def save_many_dicts(ol, batch, comment):
-    """
-    POST a batch of plain dicts to /api/save_many (ol.save_many() requires
-    olclient objects; our batch holds raw dicts from resp.json()).
-    """
-    headers = {
-        'Opt': '"http://openlibrary.org/dev/docs/api"; ns=42',
-        '42-comment': comment,
-    }
-    return ol.session.post(
-        f"{ol.base_url}/api/save_many", json.dumps(batch), headers=headers, timeout=SAVE_TIMEOUT
-    )
-
-
 def fetch_work(key: str, retries: int = 3) -> dict | None:
     """
     Download one work's JSON from Open Library, retrying with a short wait
@@ -107,6 +93,20 @@ def remove_keys(path: str, keys: set) -> int:
         with open(path, "w") as f:
             f.writelines(kept)
     return removed
+
+
+def save_many_dicts(ol, batch, comment):
+    """
+    POST a batch of plain dicts to /api/save_many (ol.save_many() requires
+    olclient objects; our batch holds raw dicts from resp.json()).
+    """
+    headers = {
+        'Opt': '"http://openlibrary.org/dev/docs/api"; ns=42',
+        '42-comment': comment,
+    }
+    return ol.session.post(
+        f"{ol.base_url}/api/save_many", json.dumps(batch), headers=headers, timeout=SAVE_TIMEOUT
+    )
 
 
 def flush_batch(ol, batch: list, comment: str, flushed_log: str, failed_log: str) -> int:
