@@ -36,6 +36,21 @@ from tags.utils import get_ol_session
 
 
 #---------------------------------------------------------------------------
+# Helper - POST raw dict batches to /api/save_many
+# ---------------------------------------------------------------------------
+def save_many_dicts(ol, batch, comment):
+    """POST a batch of plain dicts to /api/save_many (ol.save_many() requires
+    olclient objects; our batch holds raw dicts from resp.json())."""
+    headers = {
+        'Opt': '"http://openlibrary.org/dev/docs/api"; ns=42',
+        '42-comment': comment,
+    }
+    return ol.session.post(
+        f"{ol.base_url}/api/save_many", json.dumps(batch), headers=headers
+    )
+
+
+#---------------------------------------------------------------------------
 # Phase 1 - Scan dump for matched work keys
 # ---------------------------------------------------------------------------
 def scan_dump_for_matched_keys(dump_path: str, tag_type: str):
@@ -90,7 +105,7 @@ def backfill_tag_keys(keys_path: str, tag_type: str, dry_run: bool, batch_size: 
     For each work:
         1. Fetch its JSON from the OL API
         2. Run our migrator to compute which Tag keys apply
-        3. If not dry-run: set the typed field and save via save_many()
+        3. If not dry-run: set the typed field and save via save_many_dicts()
         4. If dry-run: just print what would change
     """
     # Authenticate as the bot account using S3 keys from ~/.config/ol.ini
@@ -127,7 +142,7 @@ def backfill_tag_keys(keys_path: str, tag_type: str, dry_run: bool, batch_size: 
 
         # Save in batches - save_many() with the OpenLibrary session
         if len(batch) >= batch_size:
-            r = ol.save_many(batch, f"backfill {tag_type} tags from subject mapping")
+            r = save_many_dicts(ol, batch, f"backfill {tag_type} tags from subject mapping")
             if r.status_code == 200:
                 updated += len(batch)
             else:
@@ -144,7 +159,7 @@ def backfill_tag_keys(keys_path: str, tag_type: str, dry_run: bool, batch_size: 
 
     # Flush any remaining works in the last batch
     if batch and not dry_run:
-        r = ol.save_many(batch, f"backfill {tag_type} tags from subject mapping")
+        r = save_many_dicts(ol, batch, f"backfill {tag_type} tags from subject mapping")
         if r.status_code == 200:
             updated += len(batch)
 
