@@ -202,48 +202,140 @@ def scan_dump_for_matched_keys(dump_path: str, tag_type: str):
 
 
 #---------------------------------------------------------------------------
-# Phase 2 - Fetch, migrate, save
+# Phase 2 - Process from dump (no API fetches) or batch-fetch from API
 # ---------------------------------------------------------------------------
+def process_dump_for_keys(dump_path: str, keys_set: set, tag_type: str,
+                          ol, migrator, batch_size: int, delay: float,
+                          dry_run: bool, flushed_log: str, failed_log: str,
+                          flushed_set: set):
+    """
+    Stream through the dump, process only works whose keys are in keys_set.
+    No API fetch calls — only save_many writes.
+    """
+    batch = []
+    processed = 0
+    matched = 0
+    save_time = 0.0
+    migrate_time = 0.0
+    delay_time = 0.0
+    comment = f"backfill {tag_type} tags from subject mapping"
+
+    with gzip.open(dump_path, "rt", errors="replace") as f:
+        for line in f:
+            parts = line.split("\t")
+            if len(parts) < 5:
+                continue
+
+            key = parts[1].strip()
+            if key not in keys_set:
+                continue
+
+            if key in flushed_set:
+                continue
+
+            try:
+                work = json.loads(parts[4])
+            except json.JSONDecodeError:
+                continue
+
+            t0 = time.perf_counter()
+            tag_keys = migrator.migrate(work).get(tag_type, [])
+            migrate_time += time.perf_counter() - t0
+
+            processed += 1
+            if not tag_keys:
+                continue
+
+            matched += 1
+
+            if dry_run:
+                logger.info(f"{key}: {tag_type} = {tag_keys}")
+                continue
+
+            work["key"] = key
+            work[tag_type] = tag_keys
+            batch.append(work)
+
+            if len(batch) >= batch_size:
+                t0 = time.perf_counter()
+                flush_batch(ol, batch, comment, flushed_log, failed_log)
+                save_time += time.perf_counter() - t0
+                batch = []
+
+                t0 = time.perf_counter()
+                time.sleep(delay)
+                delay_time += time.perf_counter() - t0
+
+            if matched % 1000 == 0:
+                logger.info(f"Processed {processed} works, {matched} matched...")
+
+    if batch and not dry_run:
+        t0 = time.perf_counter()
+        flush_batch(ol, batch, comment, flushed_log, failed_log)
+        save_time += time.perf_counter() - t0
+
+    return processed, matched, migrate_time, save_time, delay_time
+
+
 def backfill_tag_keys(keys_path: str, tag_type: str, dry_run: bool, batch_size: int = 100, delay: float = 1.0, resume: bool = False,
-                      flushed_log: str = "logs/genres_flushed.log", failed_log: str = "logs/genres_failed.log", fetch_retries: int = 3):
+                      flushed_log: str = "logs/genres_flushed.log", failed_log: str = "logs/genres_failed.log", fetch_retries: int = 3,
+                      dump_path: str = None):
     """
     Read work keys from Phase 1 output (one per line).
-    For each work:
-        1. Fetch its JSON from the OL API
-        2. Run our migrator to compute which Tag keys apply
-        3. If not dry-run: set the typed field and save via flush_batch()
-        4. If dry-run: just print what would change
+    If dump_path is provided, stream through the local dump for work data (no API fetches).
+    Otherwise, batch-fetch works from the OL API via /api/get_many.
 
     With --resume, works already recorded in the flushed log are skipped,
     so an interrupted run can simply be started with the same command.
     """
-    # Authenticate as the bot account using S3 keys from ~/.config/ol.ini
     ol = get_ol_session()
     migrator = WorkMigrator()
 
-    # Load the keys and remove duplicates, just in case
     keys = list(dict.fromkeys(line.strip() for line in open(keys_path) if line.strip()))
     total = len(keys)
 
-    # If resuming, remember which works were already flushed so we can skip them
     already_flushed = set()
     if resume and Path(flushed_log).exists():
         already_flushed = set(line.strip() for line in open(flushed_log) if line.strip())
         logger.info(f"Resume mode: {len(already_flushed)} works already flushed; skipping them")
 
-    # Prune the failed log of keys that already flushed: a key in both logs is done.
     if already_flushed:
         pruned = remove_keys(failed_log, already_flushed)
         if pruned:
             logger.info(f"Pruned {pruned} already-flushed entries from {failed_log}")
 
+    keys_set = set(keys)
+
+    if dump_path:
+        logger.info(f"Processing {total} keys from local dump: {dump_path}")
+        try:
+            processed, matched, migrate_time, save_time, delay_time = process_dump_for_keys(
+                dump_path, keys_set, tag_type, ol, migrator, batch_size, delay,
+                dry_run, flushed_log, failed_log, already_flushed
+            )
+        except KeyboardInterrupt:
+            logger.warning("Interrupted by the user.")
+            logger.info("Re-run with --resume to continue.")
+            return
+
+        logger.info(f"Done: {matched} works matched out of {processed} processed")
+        total_elapsed = migrate_time + save_time + delay_time
+        if total_elapsed > 0:
+            logger.info(f"--- Timing Summary ---")
+            logger.info(f"Fetch:    0.0s (0.0%)")
+            logger.info(f"Migrate:  {migrate_time:.1f}s ({100*migrate_time/total_elapsed:.1f}%)")
+            logger.info(f"Save:     {save_time:.1f}s ({100*save_time/total_elapsed:.1f}%)")
+            logger.info(f"Delay:    {delay_time:.1f}s ({100*delay_time/total_elapsed:.1f}%)")
+            logger.info(f"Total:    {total_elapsed:.1f}s")
+        return
+
+    # --- API fetch path (batch fetch via /api/get_many) ---
     updated = 0
     skipped = 0
     fetch_failures = 0
     batch = []
     comment = f"backfill {tag_type} tags from subject mapping"
 
-    # Timing accumulators
     total_fetch_time = 0.0
     total_migrate_time = 0.0
     total_save_time = 0.0
@@ -252,13 +344,11 @@ def backfill_tag_keys(keys_path: str, tag_type: str, dry_run: bool, batch_size: 
     try:
         i = 0
         while i < len(keys):
-            # Skip keys we already flushed
             if keys[i] in already_flushed:
                 skipped += 1
                 i += 1
                 continue
 
-            # Collect up to batch_size keys for a single fetch request
             fetch_keys = []
             for j in range(i, min(i + batch_size, len(keys))):
                 if keys[j] not in already_flushed:
@@ -268,7 +358,6 @@ def backfill_tag_keys(keys_path: str, tag_type: str, dry_run: bool, batch_size: 
             if not fetch_keys:
                 continue
 
-            # Fetch 100 works in one HTTP request
             t0 = time.perf_counter()
             works = fetch_works_batch(fetch_keys, fetch_retries)
             total_fetch_time += time.perf_counter() - t0
@@ -279,16 +368,13 @@ def backfill_tag_keys(keys_path: str, tag_type: str, dry_run: bool, batch_size: 
                 logger.warning(f"Batch fetch returned 0 works for {len(fetch_keys)} keys")
                 continue
 
-            # Track keys that weren't in the response
             fetched_keys = set(works.keys())
             missing = [k for k in fetch_keys if k not in fetched_keys]
             if missing:
                 fetch_failures += len(missing)
                 record_keys(failed_log, missing, unique=True)
 
-            # Process each fetched work
             for key, work in works.items():
-                # Run the migrator - returns {} if nothing matched
                 t0 = time.perf_counter()
                 tag_keys = migrator.migrate(work).get(tag_type, [])
                 total_migrate_time += time.perf_counter() - t0
@@ -299,28 +385,23 @@ def backfill_tag_keys(keys_path: str, tag_type: str, dry_run: bool, batch_size: 
                     logger.info(f"{key}: {tag_type} = {tag_keys}")
                     continue
 
-                # Set the typed field (e.g work["genres"] = ["/tags/OL179T"])
                 work[tag_type] = tag_keys
                 batch.append(work)
 
-            # Flush the group once it reaches batch_size
             if len(batch) >= batch_size:
                 t0 = time.perf_counter()
                 updated += flush_batch(ol, batch, comment, flushed_log, failed_log)
                 total_save_time += time.perf_counter() - t0
                 batch = []
 
-            # Periodic progress update
             if i % 1000 == 0 or i == len(keys):
                 logger.info(f"Processed {i}/{total} (updated {updated}, skipped {skipped}, fetch failures {fetch_failures})")
 
-            # Throttle between fetch batches
             if not dry_run:
                 t0 = time.perf_counter()
                 time.sleep(delay)
                 total_delay_time += time.perf_counter() - t0
 
-        # Flush any leftovers in the final, incomplete group
         if batch and not dry_run:
             t0 = time.perf_counter()
             updated += flush_batch(ol, batch, comment, flushed_log, failed_log)
@@ -359,19 +440,20 @@ def backfill_tag_keys(keys_path: str, tag_type: str, dry_run: bool, batch_size: 
 # ---------------------------------------------------------------------------
 def main():
     """
-    Two mutually exclusive modes:
-        --dump <path>   Phase 1: scan a dump
-        --keys <path>   Phase 2: process a key list
+    Modes:
+        --dump                          Phase 1: scan a dump, output matched work keys
+        --keys                          Phase 2: process a key list (batch-fetch from API)
+        --keys --dump <path>            Phase 2: process a key list (read work data from local dump)
     Shared switches:
-        --type <name>   Which tag type to backfill (default: genres)
-        --dry-run       Preview without writing (phase 2 only)
+        --type <name>                   Which tag type to backfill (default: genres)
+        --dry-run                       Preview without writing (phase 2 only)
     Phase 2 switches:
-        --batch-size <n>        Works per save_many request (default: 100)
-        --delay <s>             Seconds between API requests (default: 1.0)
-        --resume                Skip works already recorded in the flushed log
-        --flushed-log <path>    File recording works successfully flushed
-        --failed-log <path>     File recording works that failed to save or fetch
-        --fetch-retries <n>      Fetch retry attempts per work (default: 3)
+        --batch-size <n>                Works per save_many request (default: 100)
+        --delay <s>                     Seconds between API requests (default: 1.0)
+        --resume                        Skip works already recorded or flushed
+        --flushed-log <path>            File recording works successfully flushed
+        --failed-log <path>             File recording works that failed to save or fetch
+        --fetch-retries <n>             Fetch retry attempts per work (default: 3)
     """
     parser = argparse.ArgumentParser(description="Backfill typed Tag keys from subject strings")
     parser.add_argument("--type", default="genres", help="Tag type to backfill (default: genres)")
@@ -382,21 +464,24 @@ def main():
     parser.add_argument("--flushed-log", default=None, help="File recording flushed works (default: logs/<type>_flushed.log)")
     parser.add_argument("--failed-log", default=None, help="File recording failed works (default: logs/<type>_failed.log)")
     parser.add_argument("--fetch-retries", type=int, default=3, help="Fetch retry attempts per work (default: 3)")
-
-    group = parser.add_mutually_exclusive_group(required=True)
-    group.add_argument("--dump", help="Path to OL works dump (.txt.gz)")
-    group.add_argument("--keys", help="Path to work keys file (one per line)")
+    parser.add_argument("--dump", help="Path to OL works dump (.txt.gz) — Phase 1 scan or Phase 2 local processing")
+    parser.add_argument("--keys", help="Path to work keys file (one per line) — Phase 2 processing")
 
     args = parser.parse_args()
 
-    if args.dump:
+    # Phase 1: scan dump for matched keys (standalone --dump, no --keys)
+    if args.dump and not args.keys:
         scan_dump_for_matched_keys(args.dump, args.type)
-    else:
+    # Phase 2: process keys (--keys required, optionally with --dump for local processing)
+    elif args.keys:
         Path("logs").mkdir(exist_ok=True)
         flushed_log = args.flushed_log or f"logs/{args.type}_flushed.log"
         failed_log = args.failed_log or f"logs/{args.type}_failed.log"
         backfill_tag_keys(args.keys, args.type, args.dry_run, args.batch_size, args.delay,
-                          args.resume, flushed_log, failed_log, args.fetch_retries)
+                          args.resume, flushed_log, failed_log, args.fetch_retries,
+                          dump_path=args.dump)
+    else:
+        parser.error("Provide --dump (Phase 1) or --keys (Phase 2). Use --dump --keys for local dump processing.")
 
 if __name__ == "__main__":
     main()
