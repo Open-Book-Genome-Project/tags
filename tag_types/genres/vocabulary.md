@@ -23,14 +23,11 @@ Tag format: `genre:term` (e.g., `genre:horror`)
 | Literary | Works where language, form, and prose style are foregrounded as primary artistic concerns |
 | Mystery | Works structured around the retrospective discovery of the truth about a hidden event (typically a crime) |
 | Mythology | Works drawing substantially from or retelling mythological traditions |
+| Paranormal | Works featuring supernatural beings or phenomena as the central premise, in a register that is neither primarily fear (Horror) nor a fully secondary-world system (Fantasy) |
 | Romance | Works in which a central love relationship and its emotional development drives the plot |
 | Satire | Works that use irony, exaggeration, or ridicule to critique society, institutions, or human nature |
 | Sci-Fi | Works that extrapolate from scientific or technological possibility into speculative scenarios |
 | Thriller | Works structured around tension, urgency, and the forward-looking prevention of catastrophe |
 | Tragedy | Works in which the protagonist's downfall — through flaw, circumstance, or fate — is the central arc |
+| War / Military | Works in which the experience of organized armed conflict — combat, command, the soldier's life — is the primary narrative subject and emotional driver |
 | Western | Works set in the American West (typically 19th century) and engaging its themes of frontier, law, and survival |
-
----
-
-*Last reviewed: 2026*
-*Total: 21 genres*
