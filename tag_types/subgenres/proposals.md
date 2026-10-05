@@ -89,3 +89,26 @@ See [AGENTS.md](../AGENTS.md) for evaluation criteria.
 - **Source:** Critical category; China Miéville, Jeff VanderMeer
 - **Decision:** Deferred — 2026-04
 - **Reasoning:** The definition is contested even among fans. Could be a subgenre of Horror, Literary, or Sci-Fi. Needs a definition precise enough to apply consistently. Revisit when the literary_movement type is established — "New Weird" may be better placed there.
+
+---
+
+## Workstream C decisions (openlibrary#13755, 2026-10-05 — recommended, pending maintainer ratification)
+
+Compiled by `pr-13755-missing-tags`. Counts are live `search.json` floors; full analysis in `~/Projects/ol-kb/wiki/tags/missing-genres-subgenres.md`. Keys left empty until `create_tags.py` mints them (gated). See `PATCH-NOTES.md`.
+
+**ACCEPT (moved to vocabulary):**
+- **Alternate History** [Historical, Sci-Fi, Fantasy] — ~679 raw / ~144 readable. Strongest candidate; real base is `fiction, alternative history`. Passes No-Mashup.
+- **Magical Realism** [Literary, Drama] — count understated (dominant string `Magic realism (Literature)` has no clean subject_key; excluded `Magic realism (Art)`). Taxonomically strongest.
+- **Noir** [Crime, Mystery, Drama] — mapped `noir` only (41/21); `noir fiction` (158/36) is stolen by genre:Crime — reclaim needs a precedence fix.
+- **Cozy** [Mystery, Fantasy, Romance] — `cozy mystery` 282/45. Note mood-vs-subgenre distinction in README.
+- **Regency** [Historical, Romance] — 486/175. (from #13610 demo)
+- **Romantic Suspense** [Romance, Thriller] — 592/102. (demo)
+- **Domestic Fiction** [Drama, Literary] — 1,899/891. (demo)
+- **High Fantasy** [Fantasy] — 150/19, iconic. (demo)
+- **Urban Fantasy** [Fantasy] — 243/18, iconic; `urban fantasy` is stolen by genre:Fantasy — needs a precedence fix to fire. (demo)
+
+**DEFER:** Solarpunk (12/0); Metafiction, Comedy of Manners, Screwball Comedy, Stream of Consciousness, Sword & Sorcery (<20 readable); Surrealism & Postmodernism (movements → possible `literary_movement` type).
+
+**REDIRECT:** Police Procedural → add strings to existing **Detective** (heavy overlap, don't add a new tag). Biographical Fiction → keep deferred.
+
+**Zero-coverage existing entries (§5):** True Crime (0 — only string `true crime` stolen by genre:Crime; needs precedence fix); Cult (0 — no mappings; add curated `cult fiction` strings, confirm it is coherent); Picaresque (add `picaresque fiction`).

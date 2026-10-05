@@ -6,6 +6,16 @@
   "version": "2026-04-13",
   "tags": [
     {
+      "tag": "Alternate History",
+      "slug": "alternate-history",
+      "definition": "Structured around a divergence from documented history — a pivotal moment that went differently — and the world that results",
+      "parent_genres": [
+        "Historical",
+        "Sci-Fi",
+        "Fantasy"
+      ]
+    },
+    {
       "tag": "Apocalyptic",
       "slug": "apocalyptic",
       "definition": "The world is actively ending during the course of the narrative",
@@ -48,6 +58,16 @@
       "key": "/tags/OL270T"
     },
     {
+      "tag": "Cozy",
+      "slug": "cozy",
+      "definition": "Potentially dark or violent material handled with a light, warm, community-centered tone that privileges safety and resolution over threat",
+      "parent_genres": [
+        "Mystery",
+        "Fantasy",
+        "Romance"
+      ]
+    },
+    {
       "tag": "Cult",
       "slug": "cult",
       "definition": "Works with transgressive structure and niche or subcultural appeal; often formally experimental",
@@ -77,6 +97,15 @@
       "key": "/tags/OL273T"
     },
     {
+      "tag": "Domestic Fiction",
+      "slug": "domestic-fiction",
+      "definition": "Family relationships and household life as the central dramatic arena",
+      "parent_genres": [
+        "Drama",
+        "Literary"
+      ]
+    },
+    {
       "tag": "Dystopian",
       "slug": "dystopian",
       "definition": "A world defined by oppressive or failed societal control as the structural baseline",
@@ -85,17 +114,6 @@
         "Fantasy"
       ],
       "key": "/tags/OL274T"
-    },
-    {
-      "tag": "Epistolary",
-      "slug": "epistolary",
-      "definition": "Narrative constructed entirely from letters, diary entries, documents, or other written records",
-      "parent_genres": [
-        "Drama",
-        "Romance",
-        "Horror"
-      ],
-      "key": "/tags/OL275T"
     },
     {
       "tag": "Epic",
@@ -107,6 +125,17 @@
         "Historical"
       ],
       "key": "/tags/OL276T"
+    },
+    {
+      "tag": "Epistolary",
+      "slug": "epistolary",
+      "definition": "Narrative constructed entirely from letters, diary entries, documents, or other written records",
+      "parent_genres": [
+        "Drama",
+        "Romance",
+        "Horror"
+      ],
+      "key": "/tags/OL275T"
     },
     {
       "tag": "Espionage",
@@ -159,6 +188,14 @@
       "key": "/tags/OL281T"
     },
     {
+      "tag": "High Fantasy",
+      "slug": "high-fantasy",
+      "definition": "Set in a fully realized secondary world with its own rules, peoples, and history, where the stakes are world-scale",
+      "parent_genres": [
+        "Fantasy"
+      ]
+    },
+    {
       "tag": "Locked Room",
       "slug": "locked-room",
       "definition": "A pure logic puzzle; an impossible crime or situation that must be solved by reason alone",
@@ -166,6 +203,15 @@
         "Mystery"
       ],
       "key": "/tags/OL282T"
+    },
+    {
+      "tag": "Magical Realism",
+      "slug": "magical-realism",
+      "definition": "A realistic world in which magical events occur and are accepted as unremarkable by the characters, without the awe or systematic rules of Fantasy",
+      "parent_genres": [
+        "Literary",
+        "Drama"
+      ]
     },
     {
       "tag": "Melodrama",
@@ -176,6 +222,16 @@
         "Romance"
       ],
       "key": "/tags/OL283T"
+    },
+    {
+      "tag": "Noir",
+      "slug": "noir",
+      "definition": "A dark, fatalistic mode in which moral ambiguity and institutional corruption are structural features, not just atmosphere",
+      "parent_genres": [
+        "Crime",
+        "Mystery",
+        "Drama"
+      ]
     },
     {
       "tag": "Picaresque",
@@ -210,6 +266,24 @@
       "key": "/tags/OL286T"
     },
     {
+      "tag": "Regency",
+      "slug": "regency",
+      "definition": "Early-19th-century England's manners, courtship, and social hierarchy as the structural setting and constraint",
+      "parent_genres": [
+        "Historical",
+        "Romance"
+      ]
+    },
+    {
+      "tag": "Romantic Suspense",
+      "slug": "romantic-suspense",
+      "definition": "A romance whose central structure is driven by danger or a threat the lovers must survive together",
+      "parent_genres": [
+        "Romance",
+        "Thriller"
+      ]
+    },
+    {
       "tag": "Space Opera",
       "slug": "space-opera",
       "definition": "Interstellar conflict, galactic politics, and large-scale adventure as the structural scope",
@@ -237,6 +311,14 @@
         "Crime"
       ],
       "key": "/tags/OL289T"
+    },
+    {
+      "tag": "Urban Fantasy",
+      "slug": "urban-fantasy",
+      "definition": "Magic and the fantastic operating within a contemporary, recognizably modern (usually urban) setting",
+      "parent_genres": [
+        "Fantasy"
+      ]
     },
     {
       "tag": "Utopian",

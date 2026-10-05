@@ -86,3 +86,14 @@ See [AGENTS.md](../AGENTS.md) for evaluation criteria and [CONTRIBUTING.md](../C
 - **Definition:** Fiction closely modeled on a real person's life, where the protagonist is recognizably a specific historical individual even if events are invented or embellished.
 - **Decision:** Deferred — 2026-04
 - **Reasoning:** The distinguishing line from `Historical` genre is real but narrow. Could also be handled as `content_features:Based on real person`. Needs more examples and a clearer definition before accepting. Revisit when the features/tropes system is more mature.
+
+---
+
+## Workstream C decisions (openlibrary#13755, 2026-10-05 — recommended, pending maintainer ratification)
+
+Compiled by `pr-13755-missing-tags`. Counts are live `search.json` floors (readable = borrowable ∪ public); see `~/Projects/ol-kb/wiki/tags/missing-genres-subgenres.md`.
+
+- **Paranormal → ACCEPT (moved to vocabulary).** 4,898 raw / 1,537 readable. Top market category; genre over subgenre per market size. Coexists with a Paranormal Romance subgenre.
+- **War / Military → ACCEPT (moved to vocabulary).** 1,834 raw / 683 readable. Thema FHW + BISAC top-level. Note: the demo subgenres "War stories"/"Military fiction" share these strings; genres-first means the genre wins them — intended.
+- **Sports → REDIRECT to `main_topics`.** 1,331 raw / 501 readable, but it is *what the book is about*, not an emotional promise. Matches this file's own "may be better as a main_topic / needs catalog audit."
+- **Fairy Tale / Folklore → SPLIT, not accepted as a genre.** `folklore` is 67,792 raw but `folklore ∩ fiction` is only 2,046 (~97% nonfiction scholarship/collections). Recommend `main_topics:Folklore` + a narrow `subgenre:Fairy Tale` (retellings) under Fantasy.
