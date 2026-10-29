@@ -37,3 +37,8 @@ class TestTagKeysToRefs:
     def test_existing_dedupe(self):
         out = tag_keys_to_refs(["/tags/OL1T"], existing=[{"key": "/tags/OL1T"}])
         assert out == [{"key": "/tags/OL1T"}]
+
+    def test_skips_malformed_existing_dict_without_key(self):
+        # a stray {"name": ...} in an existing field must not raise KeyError
+        out = tag_keys_to_refs(["/tags/OL1T"], existing=[{"name": "Fantasy"}])
+        assert out == [{"key": "/tags/OL1T"}]

@@ -31,10 +31,14 @@ FAKE_TAGS = {
     # redirect chain: OL5T -> OL6T -> OL1T (live)
     "/tags/OL5T": {"key": "/tags/OL5T", "type": {"key": "/type/redirect"}, "location": "/tags/OL6T"},
     "/tags/OL6T": {"key": "/tags/OL6T", "type": {"key": "/type/redirect"}, "location": "/tags/OL1T"},
-    # deleted
+    # deleted (HTTP 200, type /type/delete)
     "/tags/OL9T": {"key": "/tags/OL9T", "type": {"key": "/type/delete"}},
     # redirect to a deleted tag
     "/tags/OL8T": {"key": "/tags/OL8T", "type": {"key": "/type/redirect"}, "location": "/tags/OL9T"},
+    # malformed: type is not a dict
+    "/tags/OL7T": {"key": "/tags/OL7T", "type": "junk"},
+    # redirect with no location
+    "/tags/OL4T": {"key": "/tags/OL4T", "type": {"key": "/type/redirect"}},
 }
 
 
@@ -81,13 +85,21 @@ class TestResolver:
         assert resolver.resolve("/tags/OL5T") == ("redirect", "/tags/OL1T")
 
     def test_deleted(self, resolver):
+        # Only an HTTP-200 /type/delete doc is a genuine deletion.
         assert resolver.resolve("/tags/OL9T") == ("deleted", None)
 
-    def test_missing_is_deleted(self, resolver):
-        assert resolver.resolve("/tags/OL404T") == ("deleted", None)
+    def test_missing_is_unresolved_not_deleted(self, resolver):
+        # A 404 is unknown, NOT a deletion -> must not cause a silent drop.
+        assert resolver.resolve("/tags/OL404T") == ("unresolved", None)
 
     def test_redirect_to_deleted(self, resolver):
         assert resolver.resolve("/tags/OL8T") == ("deleted", None)
+
+    def test_non_dict_type_is_unresolved(self, resolver):
+        assert resolver.resolve("/tags/OL7T") == ("unresolved", None)
+
+    def test_redirect_without_location_is_unresolved(self, resolver):
+        assert resolver.resolve("/tags/OL4T") == ("unresolved", None)
 
     def test_is_cached(self):
         calls = []
@@ -146,6 +158,13 @@ class TestNormalizeField:
         res = ctr.normalize_field(["/tags/OL1T", "Fantasy"], resolver)
         assert "Fantasy" in res.unclassifiable
 
+    def test_unresolved_key_is_unclassifiable_not_dropped(self, resolver):
+        # A 404/unknown key must land in unclassifiable (-> skip work), never silently drop.
+        res = ctr.normalize_field(["/tags/OL1T", "/tags/OL404T"], resolver)
+        assert "/tags/OL404T" in res.unclassifiable
+        # it is NOT recorded as a drop resolution
+        assert all(r["from"] != "/tags/OL404T" for r in res.resolutions)
+
 
 # ---------------------------------------------------------------------------
 # convert_work
@@ -202,6 +221,22 @@ class TestConvertWork:
         assert row["before"] == ["/tags/OL1T", "/tags/OL2T"]
         assert row["after"] == [{"key": "/tags/OL1T"}, {"key": "/tags/OL2T"}]
         assert row["work"] == "/works/OL1W"
+
+    def test_unresolved_value_skips_whole_work(self, resolver):
+        w = base_work()
+        w["genres"] = ["/tags/OL1T", "/tags/OL404T"]  # OL404T is a 404 (unknown)
+        res = ctr.convert_work(w, ["genres"], resolver)
+        assert res.status == "skipped"
+        assert res.new_work is None
+
+    def test_refuses_to_empty_a_nonempty_field(self, resolver):
+        # Every value resolves deleted -> would write [] -> skip & report instead.
+        w = base_work()
+        w["genres"] = ["/tags/OL9T"]
+        res = ctr.convert_work(w, ["genres"], resolver)
+        assert res.status == "skipped"
+        assert res.new_work is None
+        assert "genres" in res.skip_reason
 
     def test_redirect_and_drop_recorded_for_undo(self, resolver):
         w = base_work()
@@ -279,3 +314,36 @@ class TestNoWriteWithoutFlag:
         )
         assert len(calls) == 1
         assert calls[0][0]["genres"] == [{"key": "/tags/OL1T"}, {"key": "/tags/OL2T"}]
+
+
+class TestAuditDurability:
+    def test_audit_written_before_save_survives_failure(self, resolver):
+        """M3: a work whose save fails still has an audit row (reversible), but is
+        NOT recorded in the done-file (so resume retries it)."""
+        import io
+        w = base_work()
+        w["key"] = "/works/OLBADW"
+        audit = io.StringIO()
+        done = io.StringIO()
+
+        ctr.run_conversion(
+            works=[w], fields=["genres"], resolver=resolver,
+            saver=lambda batch, comment: False,   # save always fails
+            write=True, batch_size=100, run_id="r", comment="c",
+            audit_fp=audit, done_fp=done,
+        )
+        assert "/works/OLBADW" in audit.getvalue()   # reversible record exists
+        assert done.getvalue() == ""                 # not marked done
+
+
+class TestMakeSaverNeverCrashes:
+    def test_returns_false_instead_of_raising(self, monkeypatch):
+        """M1: a raising save backend must yield False (handled by bisect), not crash."""
+        monkeypatch.setattr(ctr.time, "sleep", lambda *_: None)
+
+        def boom(ol, batch, comment):
+            raise ConnectionError("network down")
+
+        monkeypatch.setattr(ctr, "save_many_dicts", boom)
+        saver = ctr.make_saver(ol=object(), throttle=0, retries=2)
+        assert saver([{"key": "/works/OL1W"}], "c") is False

@@ -47,7 +47,7 @@ def tag_keys_to_refs(new_keys: list, existing=None) -> list[dict]:
     seen: set[str] = set()
     refs: list[dict] = []
     for item in list(existing or []) + list(new_keys):
-        key = item["key"] if isinstance(item, dict) else item
+        key = item.get("key") if isinstance(item, dict) else item
         if key and key not in seen:
             seen.add(key)
             refs.append({"key": key})
