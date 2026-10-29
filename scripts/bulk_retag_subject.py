@@ -81,7 +81,7 @@ def work_matches_subject(work, subject, ignore_case=False, ignore_ws=False):
         return s
 
     target = norm(subject)
-    for s in work.get("subjects", []):
+    for s in (work.get("subjects") or []):   # tolerate "subjects": null
         if isinstance(s, str) and norm(s) == target:
             return s
     return None
@@ -98,7 +98,13 @@ class RetagResult:
 
 
 def _merge_tag(existing, tag_key):
-    """Merge tag_key into an existing field value (both shapes), dedupe, keep order."""
+    """Merge tag_key into an existing field value (both shapes), dedupe, keep order.
+
+    Existing entries are normalized to plain {"key": ...} refs; a malformed entry
+    (a dict with no usable key) is dropped. Tag fields hold only refs/string-keys,
+    so this is intended normalization, not data loss - same accepted trade as the
+    conversion tool's already-ref handling.
+    """
     seen, refs = set(), []
     for item in list(existing or []) + [tag_key]:
         key = item.get("key") if isinstance(item, dict) else item
@@ -120,7 +126,7 @@ def apply_retag(work, field, tag_key, matched_subject, strip_subject=False):
     field_changed = new_field != before_field
     subjects_changed = False
     if strip_subject and matched_subject is not None:
-        before_subjects = work.get("subjects", [])
+        before_subjects = work.get("subjects") or []
         if matched_subject in before_subjects:
             subjects_changed = True
 
@@ -137,7 +143,7 @@ def apply_retag(work, field, tag_key, matched_subject, strip_subject=False):
             "revision": work.get("revision"),
         })
     if subjects_changed:
-        before_subjects = work.get("subjects", [])
+        before_subjects = work.get("subjects") or []
         after_subjects = [s for s in before_subjects if s != matched_subject]
         new_work["subjects"] = after_subjects
         audit_rows.append({
@@ -181,8 +187,16 @@ def resolve_target_tag(field, tag=None, name=None, tag_type=None, *, fetch_tag, 
         if len(keys) > 1:
             raise ValueError(f"{len(keys)} {tag_type} tags named {name!r}: {keys} - disambiguate with --tag")
         key = keys[0]
-        if _live_tag_type(fetch_tag(key)) is None:
+        doc = fetch_tag(key)
+        tt = _live_tag_type(doc)
+        if tt is None:
             raise ValueError(f"resolved tag {key} is not a live /type/tag")
+        # The target must belong in the field we write it into, and actually bear
+        # the requested name - don't trust query.json's name filter (review #1).
+        if tt != field:
+            raise ValueError(f"resolved tag {key} has tag_type {tt!r}, not field {field!r}")
+        if doc.get("name") != name:
+            raise ValueError(f"resolved tag {key} name {doc.get('name')!r} != requested {name!r}")
         return key
     raise ValueError("specify --tag <OLID> or --name <name> --tag-type <type>")
 
@@ -196,7 +210,7 @@ def run_retag(works, field, tag_key, subject, saver, write, batch_size, run_id, 
     """Drive the retag over an iterable of candidate work dicts. `saver(batch, comment)`
     is only called when write is True."""
     report = {"run_id": run_id, "would_change": 0, "saved": 0, "failed": 0,
-              "nochange": 0, "nomatch": 0}
+              "nochange": 0, "nomatch": 0, "malformed": 0}
     batch, pending_audit = [], []
 
     def flush():
@@ -221,6 +235,9 @@ def run_retag(works, field, tag_key, subject, saver, write, batch_size, run_id, 
             logger.error("save failed (isolated): %s", fk)
 
     for work in works:
+        if not isinstance(work, dict):      # a null/odd body must not abort the run
+            report["malformed"] += 1
+            continue
         matched = work_matches_subject(work, subject, ignore_case, ignore_ws)
         if matched is None:
             report["nomatch"] += 1
@@ -257,7 +274,7 @@ def enumerate_subject_works(subject, limit=1000, max_keys=None):
             params={"type": "/type/work", "subjects": subject, "limit": limit, "offset": offset},
             headers={"User-Agent": USER_AGENT}, timeout=60,
         ).json()
-        if not rows:
+        if not isinstance(rows, list) or not rows:   # tolerate an error body
             break
         for r in rows:
             yield r["key"]

@@ -46,6 +46,10 @@ class TestMatch:
     def test_missing_subjects_field(self):
         assert brs.work_matches_subject({"key": "/works/OL1W"}, "Biography") is None
 
+    def test_null_subjects_does_not_crash(self):
+        # a work with "subjects": null must not raise (finding #2)
+        assert brs.work_matches_subject({"key": "/works/OL1W", "subjects": None}, "Biography") is None
+
 
 # ---------------------------------------------------------------------------
 # apply_retag
@@ -107,7 +111,8 @@ def make_fetch(docs):
 
 
 class TestResolveTarget:
-    LIVE = {"/tags/OL125T": {"key": "/tags/OL125T", "type": {"key": "/type/tag"}, "tag_type": "genres"}}
+    LIVE = {"/tags/OL125T": {"key": "/tags/OL125T", "type": {"key": "/type/tag"},
+                             "tag_type": "genres", "name": "Biography"}}
 
     def test_by_olid_live(self):
         key = brs.resolve_target_tag(
@@ -146,6 +151,32 @@ class TestResolveTarget:
         with pytest.raises(ValueError):
             brs.resolve_target_tag("genres", fetch_tag=make_fetch(self.LIVE), query_tags=None)
 
+    def test_by_name_wrong_tag_type_fails(self):
+        # finding #1: a moods tag must not be accepted for the genres field
+        docs = {"/tags/OL9T": {"key": "/tags/OL9T", "type": {"key": "/type/tag"},
+                               "tag_type": "moods", "name": "Dark"}}
+        with pytest.raises(ValueError):
+            brs.resolve_target_tag(
+                "genres", name="Dark", tag_type="moods",
+                query_tags=lambda n, t: ["/tags/OL9T"], fetch_tag=make_fetch(docs))
+
+    def test_by_name_mismatched_name_fails(self):
+        # resolved tag's name must exactly equal the requested name (don't trust the filter)
+        docs = {"/tags/OL9T": {"key": "/tags/OL9T", "type": {"key": "/type/tag"},
+                               "tag_type": "genres", "name": "Biographical"}}
+        with pytest.raises(ValueError):
+            brs.resolve_target_tag(
+                "genres", name="Biography", tag_type="genres",
+                query_tags=lambda n, t: ["/tags/OL9T"], fetch_tag=make_fetch(docs))
+
+    def test_by_name_exact_with_name_field(self):
+        docs = {"/tags/OL125T": {"key": "/tags/OL125T", "type": {"key": "/type/tag"},
+                                 "tag_type": "genres", "name": "Biography"}}
+        key = brs.resolve_target_tag(
+            "genres", name="Biography", tag_type="genres",
+            query_tags=lambda n, t: ["/tags/OL125T"], fetch_tag=make_fetch(docs))
+        assert key == "/tags/OL125T"
+
 
 # ---------------------------------------------------------------------------
 # run_retag orchestration: no-write guarantee + batching
@@ -168,3 +199,14 @@ class TestRunRetag:
         )
         assert report["would_change"] == 0
         assert report["nomatch"] == 1
+
+    def test_malformed_work_does_not_abort_run(self):
+        # a null work and a null-subjects work must be skipped, not crash the run (finding #2)
+        works = [work(["Biography"]), None, {"key": "/works/OL2W", "subjects": None},
+                 work(["Biography"])]
+        report = brs.run_retag(
+            works=works, field="genres", tag_key=TAG, subject="Biography",
+            saver=lambda b, c: True, write=False, batch_size=250, run_id="r", comment="c",
+        )
+        assert report["would_change"] == 2       # both good works processed
+        assert report["malformed"] == 1          # the None work
