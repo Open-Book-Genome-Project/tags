@@ -57,10 +57,22 @@ class TestMatch:
 TAG = "/tags/OL125T"
 
 
+class FakeRes:
+    """Minimal resolver: table maps key -> (action, target); unknown keys are live."""
+    def __init__(self, table=None):
+        self.table = table or {}
+
+    def resolve(self, key):
+        return self.table.get(key, ("live", key))
+
+
+LIVE = FakeRes()
+
+
 class TestApplyRetag:
     def test_adds_ref_to_absent_field(self):
         w = work(["Biography"])
-        res = brs.apply_retag(w, "genres", TAG, "Biography")
+        res = brs.apply_retag(w, "genres", TAG, "Biography", LIVE)
         assert res.status == "changed"
         assert res.new_work["genres"] == [{"key": TAG}]
         # other fields preserved, including falsy subtitle; subject kept by default
@@ -69,19 +81,19 @@ class TestApplyRetag:
 
     def test_merges_with_existing_both_shapes_dedupe(self):
         w = work(["Biography"]); w["genres"] = ["/tags/OL1T", {"key": "/tags/OL2T"}]
-        res = brs.apply_retag(w, "genres", TAG, "Biography")
+        res = brs.apply_retag(w, "genres", TAG, "Biography", LIVE)
         assert res.new_work["genres"] == [
             {"key": "/tags/OL1T"}, {"key": "/tags/OL2T"}, {"key": TAG}]
 
     def test_tag_already_present_no_strip_is_nochange(self):
         w = work(["Biography"]); w["genres"] = [{"key": TAG}]
-        res = brs.apply_retag(w, "genres", TAG, "Biography")
+        res = brs.apply_retag(w, "genres", TAG, "Biography", LIVE)
         assert res.status == "nochange"
         assert res.new_work is None
 
     def test_strip_subject_removes_it_and_audits_subjects(self):
         w = work(["Biography", "War"])
-        res = brs.apply_retag(w, "genres", TAG, "Biography", strip_subject=True)
+        res = brs.apply_retag(w, "genres", TAG, "Biography", LIVE, strip_subject=True)
         assert res.new_work["subjects"] == ["War"]
         assert res.new_work["genres"] == [{"key": TAG}]
         fields = {r["field"] for r in res.audit_rows}
@@ -90,17 +102,35 @@ class TestApplyRetag:
     def test_strip_only_when_tag_present_still_changes(self):
         # tag already present but subject still there + strip requested -> change (subjects)
         w = work(["Biography"]); w["genres"] = [{"key": TAG}]
-        res = brs.apply_retag(w, "genres", TAG, "Biography", strip_subject=True)
+        res = brs.apply_retag(w, "genres", TAG, "Biography", LIVE, strip_subject=True)
         assert res.status == "changed"
         assert res.new_work["subjects"] == []
 
     def test_audit_before_after_for_field(self):
         w = work(["Biography"])
-        res = brs.apply_retag(w, "genres", TAG, "Biography")
+        res = brs.apply_retag(w, "genres", TAG, "Biography", LIVE)
         row = [r for r in res.audit_rows if r["field"] == "genres"][0]
         assert row["before"] == []           # field absent -> treated as empty before
         assert row["after"] == [{"key": TAG}]
         assert row["work"] == "/works/OL1W"
+
+    def test_existing_redirect_followed_and_deleted_dropped(self):
+        # dewey MED: existing entries resolve with convert's rules so retag==convert
+        res_table = FakeRes({"/tags/OL5T": ("redirect", "/tags/OL1T"),
+                             "/tags/OL9T": ("deleted", None)})
+        w = work(["Biography"]); w["genres"] = ["/tags/OL5T", "/tags/OL9T"]
+        res = brs.apply_retag(w, "genres", TAG, "Biography", res_table)
+        assert res.new_work["genres"] == [{"key": "/tags/OL1T"}, {"key": TAG}]
+        row = [r for r in res.audit_rows if r["field"] == "genres"][0]
+        actions = {r["action"] for r in row["resolutions"]}
+        assert actions == {"redirect", "drop"}
+
+    def test_existing_unclassifiable_skips_work(self):
+        res_table = FakeRes({"/tags/OL404T": ("unresolved", None)})
+        w = work(["Biography"]); w["genres"] = ["/tags/OL404T"]
+        res = brs.apply_retag(w, "genres", TAG, "Biography", res_table)
+        assert res.status == "skipped"
+        assert res.new_work is None
 
 
 # ---------------------------------------------------------------------------

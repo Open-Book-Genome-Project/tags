@@ -20,6 +20,16 @@ Safety model mirrors convert_tag_refs.py (and reuses its primitives):
   * save_many is atomic -> failed batches bisect; every change is written to an audit
     JSONL (run id + comment + base revision) reversible by the shared undo.
 
+Two current limitations to know:
+  * The target's tag_type must equal the field, and production Tag tag_types are still
+    SINGULAR (literary_form, audience) until #13814 pluralizes them. So today
+    --field literary_forms / audiences will always refuse to resolve a target. genres
+    and subgenres work now.
+  * `enumerate` selects candidates by EXACT query.json subjects= match, so
+    --ignore-case / --ignore-whitespace only relax matching AMONG works already
+    enumerated by the exact string - true case/space variants are never discovered.
+    Enumerate once per exact spelling you want to cover.
+
 Usage:
     # candidate keys for an exact subject (snapshot)
     python scripts/bulk_retag_subject.py enumerate --subject "Biography" --out bio.keys
@@ -51,8 +61,8 @@ import requests
 sys.path.insert(0, str(Path(__file__).parent.parent))
 # Reuse the conversion tool's hardened primitives rather than duplicating them.
 from scripts.convert_tag_refs import (  # noqa: E402
-    OL, USER_AGENT, KNOWN_TAG_FIELDS, DEFAULT_COMMENT as _CONV_COMMENT,
-    TagResolver, fetch_work, make_saver, save_with_bisect,
+    OL, USER_AGENT, KNOWN_TAG_FIELDS,
+    TagResolver, normalize_field, fetch_work, make_saver, save_with_bisect,
     require_audit_for_write, apply_undo, parser_error,
 )
 from tags.utils import get_ol_session  # noqa: E402
@@ -92,34 +102,35 @@ def work_matches_subject(work, subject, ignore_case=False, ignore_ws=False):
 # ---------------------------------------------------------------------------
 @dataclass
 class RetagResult:
-    status: str                       # "changed" | "nochange"
+    status: str                       # "changed" | "nochange" | "skipped"
     new_work: dict | None = None
     audit_rows: list[dict] = dc_field(default_factory=list)
+    skip_reason: str = ""
 
 
-def _merge_tag(existing, tag_key):
-    """Merge tag_key into an existing field value (both shapes), dedupe, keep order.
-
-    Existing entries are normalized to plain {"key": ...} refs; a malformed entry
-    (a dict with no usable key) is dropped. Tag fields hold only refs/string-keys,
-    so this is intended normalization, not data loss - same accepted trade as the
-    conversion tool's already-ref handling.
-    """
-    seen, refs = set(), []
-    for item in list(existing or []) + [tag_key]:
-        key = item.get("key") if isinstance(item, dict) else item
-        if key and key not in seen:
-            seen.add(key)
-            refs.append({"key": key})
-    return refs
-
-
-def apply_retag(work, field, tag_key, matched_subject, strip_subject=False):
+def apply_retag(work, field, tag_key, matched_subject, resolver, strip_subject=False):
     """Add tag_key to work[field] (and optionally strip matched_subject from subjects).
-    Returns a new work with only those fields changed, or nochange."""
+
+    Existing field entries are run through the SAME resolver rules as the conversion
+    tool (follow redirects, drop a definitive /type/delete, audited; an unresolvable
+    value skips the whole work), so a retag leaves the field in exactly the shape a
+    conversion would - and never saves a field that still holds a dead ref (dewey MED).
+    Returns a new work with only those fields changed, nochange, or skipped.
+    """
     work_key = work.get("key", "<unknown>")
     before_field = work.get(field, [])
-    new_field = _merge_tag(before_field, tag_key)
+
+    norm = normalize_field(before_field, resolver)
+    if norm.unclassifiable:
+        return RetagResult(
+            status="skipped",
+            skip_reason=f"{work_key}: unclassifiable existing {field} values: {norm.unclassifiable}",
+        )
+    # merge the (already resolved, live) target tag into the resolved existing refs
+    new_field = list(norm.new_refs)
+    if not any(r["key"] == tag_key for r in new_field):
+        new_field.append({"key": tag_key})
+
     audit_rows = []
     new_work = None
 
@@ -140,6 +151,7 @@ def apply_retag(work, field, tag_key, matched_subject, strip_subject=False):
         audit_rows.append({
             "work": work_key, "field": field,
             "before": before_field, "after": new_field,
+            "resolutions": norm.resolutions,
             "revision": work.get("revision"),
         })
     if subjects_changed:
@@ -206,11 +218,12 @@ def resolve_target_tag(field, tag=None, name=None, tag_type=None, *, fetch_tag, 
 # ---------------------------------------------------------------------------
 def run_retag(works, field, tag_key, subject, saver, write, batch_size, run_id, comment,
               ignore_case=False, ignore_ws=False, strip_subject=False,
-              audit_fp=None, done_fp=None) -> dict:
+              audit_fp=None, done_fp=None, resolver=None) -> dict:
     """Drive the retag over an iterable of candidate work dicts. `saver(batch, comment)`
     is only called when write is True."""
+    resolver = resolver or TagResolver()
     report = {"run_id": run_id, "would_change": 0, "saved": 0, "failed": 0,
-              "nochange": 0, "nomatch": 0, "malformed": 0}
+              "nochange": 0, "nomatch": 0, "skipped": 0, "malformed": 0}
     batch, pending_audit = [], []
 
     def flush():
@@ -242,9 +255,13 @@ def run_retag(works, field, tag_key, subject, saver, write, batch_size, run_id, 
         if matched is None:
             report["nomatch"] += 1
             continue
-        res = apply_retag(work, field, tag_key, matched, strip_subject)
+        res = apply_retag(work, field, tag_key, matched, resolver, strip_subject)
         if res.status == "nochange":
             report["nochange"] += 1
+            continue
+        if res.status == "skipped":
+            report["skipped"] += 1
+            logger.warning(res.skip_reason)
             continue
         report["would_change"] += 1
         for row in res.audit_rows:
@@ -392,8 +409,10 @@ def build_parser():
     r.add_argument("--tag", help="target Tag OLID (preferred), e.g. OL125T")
     r.add_argument("--name", help="target Tag name (with --tag-type); must resolve to one live Tag")
     r.add_argument("--tag-type", help="target Tag tag_type (defaults to --field)")
-    r.add_argument("--ignore-case", action="store_true")
-    r.add_argument("--ignore-whitespace", action="store_true")
+    r.add_argument("--ignore-case", action="store_true",
+                   help="relax matching ONLY among works already enumerated by the exact subject")
+    r.add_argument("--ignore-whitespace", action="store_true",
+                   help="relax matching ONLY among works already enumerated by the exact subject")
     r.add_argument("--strip-subject", action="store_true", help="also remove the matched subject")
     r.add_argument("--write", action="store_true", help="ACTUALLY write (default: dry-run)")
     r.add_argument("--batch-size", type=int, default=250)
