@@ -36,6 +36,23 @@ from tags.utils import get_ol_session
 FETCH_TIMEOUT = 30   # seconds for fetching a single work JSON
 SAVE_TIMEOUT = 60    # seconds for the save_many POST (matches OL batch-script convention)
 
+
+def tag_keys_to_refs(new_keys: list, existing=None) -> list[dict]:
+    """Merge new Tag keys with any existing field value and return new-style refs.
+
+    Reads both stored shapes ("/tags/OL1T" and {"key": "/tags/OL1T"}), dedupes
+    preserving first-seen order, and emits [{"key": "/tags/OL1T"}, ...]. Every
+    writer must emit refs, never strings (#13929).
+    """
+    seen: set[str] = set()
+    refs: list[dict] = []
+    for item in list(existing or []) + list(new_keys):
+        key = item["key"] if isinstance(item, dict) else item
+        if key and key not in seen:
+            seen.add(key)
+            refs.append({"key": key})
+    return refs
+
 #---------------------------------------------------------------------------
 # Phase 2 helpers - fetch (batch), record keys, flush a batch, POST raw dicts
 # ---------------------------------------------------------------------------
@@ -253,7 +270,7 @@ def process_dump_for_keys(dump_path: str, keys_set: set, tag_type: str,
                 continue
 
             work["key"] = key
-            work[tag_type] = tag_keys
+            work[tag_type] = tag_keys_to_refs(tag_keys, work.get(tag_type))
             batch.append(work)
 
             if len(batch) >= batch_size:
@@ -385,7 +402,7 @@ def backfill_tag_keys(keys_path: str, tag_type: str, dry_run: bool, batch_size: 
                     logger.info(f"{key}: {tag_type} = {tag_keys}")
                     continue
 
-                work[tag_type] = tag_keys
+                work[tag_type] = tag_keys_to_refs(tag_keys, work.get(tag_type))
                 batch.append(work)
 
             if len(batch) >= batch_size:
