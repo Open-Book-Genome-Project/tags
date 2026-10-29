@@ -19,7 +19,15 @@ Safety model (read the hard limits in #13929 first):
     work to be skipped and reported - nothing is written half-converted.
   * save_many is atomic, so a failed batch is bisected down to the offending work,
     which is logged and skipped; everything else in the batch still saves.
-  * Every audit row carries the run id and the save comment, so a run is reversible.
+  * Every audit row carries the run id, save comment and the work revision we based
+    the write on, so a run is reversible and overwrites are detectable after the fact.
+
+Staleness window: a work is re-fetched live, then held until its batch of
+--batch-size flushes, and /api/save_many does NOT check revisions - so an edit made
+to a work in that window would be overwritten. The window is kept small (one batch,
+throttled), undo is conditional (it refuses to clobber a value edited since the run),
+and each audit row records the base revision for forensics. Lower --batch-size to
+shrink the window further.
 
 Typical use:
     # 1. Snapshot the full set of affected work keys to a file (the frozen work
@@ -64,11 +72,12 @@ USER_AGENT = "ol-tags convert_tag_refs (#13929; mek@archive.org)"
 TAG_KEY_RE = re.compile(r"^/tags/OL\d+T$")
 DEFAULT_COMMENT = "Convert Tag fields to refs (#13929)"
 
-# Fields that may carry Tag values on a work. Conversion only acts on the fields
-# the operator names on the CLI; this is the allow-list guarding --fields.
+# Work Tag fields are PLURAL (the decided work-field names); the singular form
+# (e.g. literary_form) is only a Tag's tag_type, never a work field. This is the
+# allow-list guarding --fields.
 KNOWN_TAG_FIELDS = [
     "genres", "subgenres", "audiences", "content_formats",
-    "content_warnings", "moods", "literary_form",
+    "content_warnings", "literary_forms", "moods",
 ]
 
 
@@ -287,6 +296,7 @@ def convert_work(work: dict, fields, resolver: TagResolver) -> ConvertResult:
             "before": work[f],
             "after": res.new_refs,
             "resolutions": res.resolutions,
+            "revision": work.get("revision"),  # revision we based the write on (staleness forensics)
         })
     return ConvertResult(status="changed", new_work=new_work, audit_rows=audit_rows)
 
@@ -428,34 +438,83 @@ def fetch_work(key: str) -> dict:
     return resp.json()
 
 
+def is_transient_failure(status: int | None = None, exc: Exception | None = None) -> bool:
+    """Whether a save failure is worth retrying. A 4xx is deterministic (a bad/dead
+    ref, a malformed doc) - retrying wastes minutes before the bisect isolates it -
+    so only 429 and 5xx, and network-level exceptions, are transient (dewey #3)."""
+    if exc is not None:
+        return True  # connection reset / timeout / DNS etc.
+    if status is None:
+        return False
+    return status == 429 or status >= 500
+
+
 def make_saver(ol, throttle: float, retries: int = 3):
     """Return a saver(batch, comment) -> bool.
 
     Posts the raw work dicts straight to /api/save_many via the shared
     save_many_dicts() helper (the same faithful raw POST backfill_tags uses) -
     deliberately NOT olclient's save_many(), which re-serializes through its Work
-    model. Retries transient failures with backoff and returns False (rather than
-    raising) so a batch failure is handled by the bisect, not a crashed run.
+    model. Retries only TRANSIENT failures with backoff; a deterministic 4xx
+    returns False at once so the bisect isolates the offending work fast. Always
+    returns False (never raises) so a batch failure is handled by the bisect.
     """
     def saver(batch, comment):
         last = None
         for attempt in range(retries):
             try:
                 r = save_many_dicts(ol, batch, comment)
-                if getattr(r, "status_code", 500) == 200:
+                status = getattr(r, "status_code", 500)
+                if status == 200:
                     if throttle:
                         time.sleep(throttle)
                     return True
-                last = f"{r.status_code} {r.text[:200]}"
+                last = f"{status} {getattr(r, 'text', '')[:200]}"
+                if not is_transient_failure(status=status):
+                    logger.error("save_many deterministic failure (%s); not retrying", last)
+                    return False
             except Exception as e:  # noqa: BLE001
                 last = str(e)
+                if not is_transient_failure(exc=e):
+                    return False
             wait = 30 * (attempt + 1)
-            logger.warning("save_many failed (%s); waiting %ss retry %d/%d",
+            logger.warning("save_many transient failure (%s); waiting %ss retry %d/%d",
                            last, wait, attempt + 1, retries)
             time.sleep(wait)
         logger.error("save_many giving up on batch of %d: %s", len(batch), last)
         return False
     return saver
+
+
+# ---------------------------------------------------------------------------
+# CLI argument / undo policy helpers (pure, unit-tested)
+# ---------------------------------------------------------------------------
+def require_audit_for_write(write: bool, audit, done) -> None:
+    """A real run must be reversible and resumable: --write requires both --audit
+    and --done (dewey #1)."""
+    if write and (not audit or not done):
+        parser_error("--write requires both --audit <file> and --done <file> "
+                     "(a real run must be reversible and resumable)")
+
+
+def undo_decision(live_value, before, after) -> str:
+    """Decide how to undo one audit row given the field's current live value:
+        "restore"       - live == after: our change is intact, revert to before
+        "skip-noop"     - live == before: already at before (reverted, or the save
+                          had failed) - nothing to do
+        "skip-conflict" - live is something else: edited since our run - do NOT
+                          clobber it (dewey #2)
+    """
+    if live_value == after:
+        return "restore"
+    if live_value == before:
+        return "skip-noop"
+    return "skip-conflict"
+
+
+def order_undo_rows(rows):
+    """Newest-first, so multiple runs on one work unwind in reverse order (dewey #2)."""
+    return sorted(rows, key=lambda r: r.get("ts", ""), reverse=True)
 
 
 # ---------------------------------------------------------------------------
@@ -475,6 +534,7 @@ def cmd_enumerate(args):
 
 
 def cmd_convert(args):
+    require_audit_for_write(args.write, args.audit, args.done)
     fields = [f.strip() for f in args.fields.split(",") if f.strip()]
     for f in fields:
         if f not in KNOWN_TAG_FIELDS:
@@ -526,26 +586,39 @@ def cmd_convert(args):
 
 def cmd_undo(args):
     run_id = f"undo-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}"
-    rows = [json.loads(l) for l in open(args.audit) if l.strip()]
-    logger.info("undo: %d audit rows (write=%s)", len(rows), args.write)
+    rows = order_undo_rows([json.loads(l) for l in open(args.audit) if l.strip()])
+    logger.info("undo: %d audit rows, newest-first (write=%s)", len(rows), args.write)
     ol = get_ol_session() if args.write else None
     saver = make_saver(ol, args.throttle) if args.write else (lambda b, c: True)
-    restored = 0
+    counts = {"restored": 0, "noop": 0, "conflict": 0, "error": 0}
     for row in rows:
         try:
             work = fetch_work(row["work"])
         except Exception as e:  # noqa: BLE001
             logger.error("undo fetch failed %s: %s", row["work"], e)
+            counts["error"] += 1
             continue
+        decision = undo_decision(work.get(row["field"]), row["before"], row["after"])
+        if decision == "skip-noop":
+            counts["noop"] += 1
+            continue
+        if decision == "skip-conflict":
+            counts["conflict"] += 1
+            logger.warning("undo SKIP (edited since run): %s %s is %r, not our %r",
+                           row["work"], row["field"], work.get(row["field"]), row["after"])
+            continue
+        # restore
         work[row["field"]] = row["before"]
         comment = f"Undo {row.get('run_id', '?')} ({run_id})"
         if args.write:
             if saver([work], comment):
-                restored += 1
+                counts["restored"] += 1
+            else:
+                counts["error"] += 1
         else:
             logger.info("[DRY] undo %s %s -> %s", row["work"], row["field"], row["before"])
-            restored += 1
-    logger.info("undo DONE: %d restored%s", restored, "" if args.write else " (dry-run)")
+            counts["restored"] += 1
+    logger.info("undo DONE%s: %s", "" if args.write else " (dry-run)", json.dumps(counts))
 
 
 def parser_error(msg):

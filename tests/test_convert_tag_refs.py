@@ -347,3 +347,97 @@ class TestMakeSaverNeverCrashes:
         monkeypatch.setattr(ctr, "save_many_dicts", boom)
         saver = ctr.make_saver(ol=object(), throttle=0, retries=2)
         assert saver([{"key": "/works/OL1W"}], "c") is False
+
+
+class _FakeResp:
+    def __init__(self, status):
+        self.status_code = status
+        self.text = f"status {status}"
+
+
+class TestTransientClassification:
+    def test_4xx_not_transient(self):
+        assert ctr.is_transient_failure(status=400) is False
+        assert ctr.is_transient_failure(status=403) is False
+
+    def test_429_and_5xx_transient(self):
+        assert ctr.is_transient_failure(status=429) is True
+        assert ctr.is_transient_failure(status=503) is True
+
+    def test_network_exception_transient(self):
+        assert ctr.is_transient_failure(exc=ConnectionError("x")) is True
+
+
+class TestSaverRetryPolicy:
+    def test_deterministic_4xx_returns_false_without_waiting(self, monkeypatch):
+        """dewey #3: a 400 is deterministic -> fail fast, no 30/60/90s retries."""
+        sleeps = []
+        monkeypatch.setattr(ctr.time, "sleep", lambda s: sleeps.append(s))
+        monkeypatch.setattr(ctr, "save_many_dicts", lambda ol, b, c: _FakeResp(400))
+        saver = ctr.make_saver(ol=object(), throttle=0, retries=3)
+        assert saver([{"key": "/works/OL1W"}], "c") is False
+        assert sleeps == []        # no backoff waits for a deterministic failure
+
+    def test_transient_5xx_retries_then_false(self, monkeypatch):
+        waits = []
+        monkeypatch.setattr(ctr.time, "sleep", lambda s: waits.append(s))
+        monkeypatch.setattr(ctr, "save_many_dicts", lambda ol, b, c: _FakeResp(503))
+        saver = ctr.make_saver(ol=object(), throttle=0, retries=3)
+        assert saver([{"key": "/works/OL1W"}], "c") is False
+        assert len(waits) >= 1      # it did back off and retry
+
+
+class TestRequireAuditForWrite:
+    def test_write_without_audit_or_done_refused(self):
+        import pytest as _pytest
+        with _pytest.raises(SystemExit):
+            ctr.require_audit_for_write(write=True, audit=None, done="d.done")
+        with _pytest.raises(SystemExit):
+            ctr.require_audit_for_write(write=True, audit="a.jsonl", done=None)
+
+    def test_write_with_both_ok(self):
+        ctr.require_audit_for_write(write=True, audit="a.jsonl", done="d.done")
+
+    def test_dry_run_needs_neither(self):
+        ctr.require_audit_for_write(write=False, audit=None, done=None)
+
+
+class TestUndoDecision:
+    def test_live_equals_after_restores(self):
+        after = [{"key": "/tags/OL1T"}]
+        before = ["/tags/OL1T"]
+        assert ctr.undo_decision(after, before, after) == "restore"
+
+    def test_live_equals_before_is_noop(self):
+        after = [{"key": "/tags/OL1T"}]
+        before = ["/tags/OL1T"]
+        assert ctr.undo_decision(before, before, after) == "skip-noop"
+
+    def test_live_something_else_is_conflict(self):
+        after = [{"key": "/tags/OL1T"}]
+        before = ["/tags/OL1T"]
+        live = [{"key": "/tags/OL1T"}, {"key": "/tags/OL2T"}]  # librarian edit
+        assert ctr.undo_decision(live, before, after) == "skip-conflict"
+
+
+class TestUndoOrdering:
+    def test_newest_first(self):
+        rows = [
+            {"work": "/works/OL1W", "ts": "2026-10-01T00:00:00+00:00"},
+            {"work": "/works/OL1W", "ts": "2026-10-03T00:00:00+00:00"},
+            {"work": "/works/OL1W", "ts": "2026-10-02T00:00:00+00:00"},
+        ]
+        ordered = ctr.order_undo_rows(rows)
+        assert [r["ts"] for r in ordered] == [
+            "2026-10-03T00:00:00+00:00",
+            "2026-10-02T00:00:00+00:00",
+            "2026-10-01T00:00:00+00:00",
+        ]
+
+
+class TestKnownFieldsArePlural:
+    def test_plural_work_fields(self):
+        assert "literary_forms" in ctr.KNOWN_TAG_FIELDS
+        assert "literary_form" not in ctr.KNOWN_TAG_FIELDS   # that's the Tag's tag_type, not the work field
+        for f in ("genres", "subgenres", "audiences", "content_formats", "content_warnings"):
+            assert f in ctr.KNOWN_TAG_FIELDS
