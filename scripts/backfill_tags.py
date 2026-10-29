@@ -35,6 +35,12 @@ from tags.utils import get_ol_session
 
 FETCH_TIMEOUT = 30   # seconds for fetching a single work JSON
 SAVE_TIMEOUT = 60    # seconds for the save_many POST (matches OL batch-script convention)
+WORK_FIELD_BY_TAG_TYPE = {"audience": "audiences"}
+
+
+def work_field_for_tag_type(tag_type: str) -> str:
+    """Return the work property used to store a given tag type."""
+    return WORK_FIELD_BY_TAG_TYPE.get(tag_type, tag_type)
 
 #---------------------------------------------------------------------------
 # Phase 2 helpers - fetch (batch), record keys, flush a batch, POST raw dicts
@@ -253,7 +259,7 @@ def process_dump_for_keys(dump_path: str, keys_set: set, tag_type: str,
                 continue
 
             work["key"] = key
-            work[tag_type] = tag_keys
+            work[work_field_for_tag_type(tag_type)] = tag_keys
             batch.append(work)
 
             if len(batch) >= batch_size:
@@ -385,7 +391,7 @@ def backfill_tag_keys(keys_path: str, tag_type: str, dry_run: bool, batch_size: 
                     logger.info(f"{key}: {tag_type} = {tag_keys}")
                     continue
 
-                work[tag_type] = tag_keys
+                work[work_field_for_tag_type(tag_type)] = tag_keys
                 batch.append(work)
 
             if len(batch) >= batch_size:
