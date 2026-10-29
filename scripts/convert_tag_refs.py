@@ -979,24 +979,14 @@ def cmd_convert(args):
         logger.info("DRY-RUN: no writes performed. Re-run with --write to apply.")
 
 
-def cmd_undo(args):
-    """Reverse a run from its audit log.
-
-    F5 - ordering matters: undo restores the prior **string** form of each field. A
-    save holding strings is only accepted while production `/type/work` does NOT
-    declare the field with `expected_type /type/tag`; once declared, Infobase rejects
-    a string-form save and undo cannot reverse those works. Note #14229 edits
-    `work.type` in the repo, and a deploy does NOT change prod's `/type/work`
-    document (it is rev 14 in the database) - so this risk only arises if someone
-    declares the field by hand. Run undo BEFORE any such declaration.
-    """
+def apply_undo(rows, saver, write: bool) -> dict:
+    """Reverse a set of audit rows (shared by convert and bulk_retag). Restores a
+    field only when its live value still equals the recorded "after"; skips a
+    no-op (live == before) or a conflict (edited since the run). Rows are processed
+    newest-first. `saver(batch, comment) -> bool` is only called when write."""
     run_id = f"undo-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}"
-    rows = order_undo_rows([json.loads(l) for l in open(args.audit) if l.strip()])
-    logger.info("undo: %d audit rows, newest-first (write=%s)", len(rows), args.write)
-    ol = get_write_session(args.creds) if args.write else None
-    saver = make_saver(ol, args.throttle) if args.write else (lambda b, c: True)
     counts = {"restored": 0, "noop": 0, "conflict": 0, "error": 0}
-    for row in rows:
+    for row in order_undo_rows(rows):
         try:
             work = fetch_work(row["work"])
         except Exception as e:  # noqa: BLE001
@@ -1012,10 +1002,9 @@ def cmd_undo(args):
             logger.warning("undo SKIP (edited since run): %s %s is %r, not our %r",
                            row["work"], row["field"], work.get(row["field"]), row["after"])
             continue
-        # restore
         work[row["field"]] = row["before"]
         comment = f"Undo {row.get('run_id', '?')} ({run_id})"
-        if args.write:
+        if write:
             if saver([work], comment):
                 counts["restored"] += 1
             else:
@@ -1023,6 +1012,25 @@ def cmd_undo(args):
         else:
             logger.info("[DRY] undo %s %s -> %s", row["work"], row["field"], row["before"])
             counts["restored"] += 1
+    return counts
+
+
+def cmd_undo(args):
+    """Reverse a run from its audit log.
+
+    F5 - ordering matters: undo restores the prior **string** form of each field. A
+    save holding strings is only accepted while production `/type/work` does NOT
+    declare the field with `expected_type /type/tag`; once declared, Infobase rejects
+    a string-form save and undo cannot reverse those works. Note #14229 edits
+    `work.type` in the repo, and a deploy does NOT change prod's `/type/work`
+    document (it is rev 14 in the database) - so this risk only arises if someone
+    declares the field by hand. Run undo BEFORE any such declaration.
+    """
+    rows = [json.loads(l) for l in open(args.audit) if l.strip()]
+    logger.info("undo: %d audit rows, newest-first (write=%s)", len(rows), args.write)
+    ol = get_write_session(args.creds) if args.write else None
+    saver = make_saver(ol, args.throttle) if args.write else (lambda b, c: True)
+    counts = apply_undo(rows, saver, args.write)
     logger.info("undo DONE%s: %s", "" if args.write else " (dry-run)", json.dumps(counts))
 
 
