@@ -141,16 +141,38 @@ def make_fetch(docs):
 
 
 class TestResolveTarget:
+    # Mek's convention (2026-11-02, #14229): a Tag's tag_type is SINGULAR ("genre"),
+    # the work field is its plural stem ("genres"). The target check is tag_type + "s"
+    # == field, so a Tag whose tag_type is "genre" belongs in the "genres" field.
     LIVE = {"/tags/OL125T": {"key": "/tags/OL125T", "type": {"key": "/type/tag"},
-                             "tag_type": "genres", "name": "Biography"}}
+                             "tag_type": "genre", "name": "Biography"}}
 
     def test_by_olid_live(self):
         key = brs.resolve_target_tag(
             "genres", tag="OL125T", fetch_tag=make_fetch(self.LIVE), query_tags=None)
         assert key == "/tags/OL125T"
 
+    def test_by_olid_singular_tag_type_matches_plural_field(self):
+        # the core convention flip: a singular tag_type resolves into the plural field,
+        # including the two (audience, literary_form) that the OLD plural==field check
+        # could never resolve.
+        for tt, fld in (("genre", "genres"), ("subgenre", "subgenres"),
+                        ("audience", "audiences"), ("literary_form", "literary_forms"),
+                        ("content_format", "content_formats")):
+            docs = {"/tags/OL125T": {"key": "/tags/OL125T", "type": {"key": "/type/tag"},
+                                     "tag_type": tt, "name": "X"}}
+            assert brs.resolve_target_tag(
+                fld, tag="OL125T", fetch_tag=make_fetch(docs), query_tags=None) == "/tags/OL125T"
+
+    def test_by_olid_plural_tag_type_now_rejected(self):
+        # old-style PLURAL tag_type no longer matches ("genres" + "s" = "genress" != "genres")
+        docs = {"/tags/OL125T": {"key": "/tags/OL125T", "type": {"key": "/type/tag"},
+                                 "tag_type": "genres", "name": "Biography"}}
+        with pytest.raises(ValueError):
+            brs.resolve_target_tag("genres", tag="OL125T", fetch_tag=make_fetch(docs), query_tags=None)
+
     def test_by_olid_wrong_tag_type_fails(self):
-        docs = {"/tags/OL125T": {"key": "/tags/OL125T", "type": {"key": "/type/tag"}, "tag_type": "moods"}}
+        docs = {"/tags/OL125T": {"key": "/tags/OL125T", "type": {"key": "/type/tag"}, "tag_type": "mood"}}
         with pytest.raises(ValueError):
             brs.resolve_target_tag("genres", tag="OL125T", fetch_tag=make_fetch(docs), query_tags=None)
 
@@ -161,20 +183,20 @@ class TestResolveTarget:
 
     def test_by_name_exactly_one(self):
         key = brs.resolve_target_tag(
-            "genres", name="Biography", tag_type="genres",
+            "genres", name="Biography", tag_type="genre",
             query_tags=lambda n, t: ["/tags/OL125T"], fetch_tag=make_fetch(self.LIVE))
         assert key == "/tags/OL125T"
 
     def test_by_name_zero_fails(self):
         with pytest.raises(ValueError):
             brs.resolve_target_tag(
-                "genres", name="Nope", tag_type="genres",
+                "genres", name="Nope", tag_type="genre",
                 query_tags=lambda n, t: [], fetch_tag=make_fetch(self.LIVE))
 
     def test_by_name_multiple_fails(self):
         with pytest.raises(ValueError):
             brs.resolve_target_tag(
-                "genres", name="Dup", tag_type="genres",
+                "genres", name="Dup", tag_type="genre",
                 query_tags=lambda n, t: ["/tags/OL1T", "/tags/OL2T"], fetch_tag=make_fetch(self.LIVE))
 
     def test_neither_tag_nor_name_fails(self):
@@ -182,30 +204,43 @@ class TestResolveTarget:
             brs.resolve_target_tag("genres", fetch_tag=make_fetch(self.LIVE), query_tags=None)
 
     def test_by_name_wrong_tag_type_fails(self):
-        # finding #1: a moods tag must not be accepted for the genres field
+        # finding #1: a mood tag must not be accepted for the genres field
         docs = {"/tags/OL9T": {"key": "/tags/OL9T", "type": {"key": "/type/tag"},
-                               "tag_type": "moods", "name": "Dark"}}
+                               "tag_type": "mood", "name": "Dark"}}
         with pytest.raises(ValueError):
             brs.resolve_target_tag(
-                "genres", name="Dark", tag_type="moods",
+                "genres", name="Dark", tag_type="mood",
                 query_tags=lambda n, t: ["/tags/OL9T"], fetch_tag=make_fetch(docs))
 
     def test_by_name_mismatched_name_fails(self):
         # resolved tag's name must exactly equal the requested name (don't trust the filter)
         docs = {"/tags/OL9T": {"key": "/tags/OL9T", "type": {"key": "/type/tag"},
-                               "tag_type": "genres", "name": "Biographical"}}
+                               "tag_type": "genre", "name": "Biographical"}}
         with pytest.raises(ValueError):
             brs.resolve_target_tag(
-                "genres", name="Biography", tag_type="genres",
+                "genres", name="Biography", tag_type="genre",
                 query_tags=lambda n, t: ["/tags/OL9T"], fetch_tag=make_fetch(docs))
 
     def test_by_name_exact_with_name_field(self):
         docs = {"/tags/OL125T": {"key": "/tags/OL125T", "type": {"key": "/type/tag"},
-                                 "tag_type": "genres", "name": "Biography"}}
+                                 "tag_type": "genre", "name": "Biography"}}
         key = brs.resolve_target_tag(
-            "genres", name="Biography", tag_type="genres",
+            "genres", name="Biography", tag_type="genre",
             query_tags=lambda n, t: ["/tags/OL125T"], fetch_tag=make_fetch(docs))
         assert key == "/tags/OL125T"
+
+
+class TestExpectedTagType:
+    """field (plural work field) -> the singular Tag tag_type it accepts."""
+
+    def test_strips_trailing_s(self):
+        assert brs._expected_tag_type("genres") == "genre"
+        assert brs._expected_tag_type("subgenres") == "subgenre"
+        assert brs._expected_tag_type("audiences") == "audience"
+        assert brs._expected_tag_type("content_formats") == "content_format"
+        assert brs._expected_tag_type("content_warnings") == "content_warning"
+        assert brs._expected_tag_type("literary_forms") == "literary_form"
+        assert brs._expected_tag_type("moods") == "mood"
 
 
 # ---------------------------------------------------------------------------

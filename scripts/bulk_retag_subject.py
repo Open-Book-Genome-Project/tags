@@ -13,18 +13,24 @@ Safety model mirrors convert_tag_refs.py (and reuses its primitives):
     dry-run diff shows the exact stored string that matched.
   * The target Tag is resolved against PRODUCTION (production is the authority):
     by --tag OLID, or by --name + --tag-type that must resolve to exactly ONE live
-    Tag (fail loudly on 0 or >1). Its tag_type must equal the target field.
+    Tag (fail loudly on 0 or >1). Its (singular) tag_type + "s" must equal the target
+    field (tag_type is SINGULAR, e.g. "genre"; the work field is the plural "genres").
   * Add-only: the Tag is merged (dedupe, order-preserving, both shapes); a work that
     already has it (and isn't being subject-stripped) is a no-op.
   * The matched subject is KEPT by default; --strip-subject removes it from subjects.
   * save_many is atomic -> failed batches bisect; every change is written to an audit
     JSONL (run id + comment + base revision) reversible by the shared undo.
 
-Two current limitations to know:
-  * The target's tag_type must equal the field, and production Tag tag_types are still
-    SINGULAR (literary_form, audience) until #13814 pluralizes them. So today
-    --field literary_forms / audiences will always refuse to resolve a target. genres
-    and subgenres work now.
+Tag tag_type convention (Mek, 2026-11-02; indexer flip in #14229):
+  * A Tag's tag_type is SINGULAR (genre, subgenre, audience, literary_form, ...) and
+    the work field is the plural stem (genres, ...), so the target check is
+    tag_type + "s" == field. This resolves targets for ALL types, including the two
+    (audiences, literary_forms) the old plural==field check could never match.
+  * This needs the production Tag docs retyped plural->singular and #14229 deployed
+    before a real run; otherwise a not-yet-retyped Tag (tag_type still "genres") is
+    correctly refused. The retype itself is tracked separately (lead-owned).
+
+One current limitation to know:
   * `enumerate` selects candidates by EXACT query.json subjects= match, so
     --ignore-case / --ignore-whitespace only relax matching AMONG works already
     enumerated by the exact string - true case/space variants are never discovered.
@@ -36,7 +42,7 @@ Usage:
 
     # dry-run: add the Biography genre Tag to matching works
     python scripts/bulk_retag_subject.py retag --keys bio.keys --subject "Biography" \
-        --field genres --name "Biography" --tag-type genres
+        --field genres --name "Biography" --tag-type genre
 
     # real run (requires --audit/--done)
     python scripts/bulk_retag_subject.py retag --keys bio.keys --subject "Biography" \
@@ -177,20 +183,32 @@ def _live_tag_type(doc):
     return doc.get("tag_type")
 
 
+def _expected_tag_type(field: str) -> str:
+    """The singular Tag tag_type that belongs in a plural work field (genres -> genre).
+
+    Mek's convention (2026-11-02, #14229): a Tag's tag_type is SINGULAR and the work
+    field is its plural stem, i.e. field == tag_type + "s". So the target check is
+    tag_type + "s" == field, expressed here as tag_type == field-without-its-"s".
+    """
+    return field[:-1] if field.endswith("s") else field
+
+
 def resolve_target_tag(field, tag=None, name=None, tag_type=None, *, fetch_tag, query_tags):
     """Resolve the target Tag key, failing loudly unless it is unambiguous and live.
 
-    - tag (OLID): must be a live /type/tag whose tag_type == field.
+    - tag (OLID): must be a live /type/tag whose (singular) tag_type + "s" == field.
     - name + tag_type: must resolve via production to exactly ONE live tag.
     """
+    expected = _expected_tag_type(field)
     if tag:
         key = tag if tag.startswith("/tags/") else f"/tags/{tag}"
         doc = fetch_tag(key)
         tt = _live_tag_type(doc)
         if tt is None:
             raise ValueError(f"target tag {key} is not a live /type/tag")
-        if tt != field:
-            raise ValueError(f"target tag {key} has tag_type {tt!r}, not field {field!r}")
+        if tt != expected:
+            raise ValueError(
+                f"target tag {key} has tag_type {tt!r}, not {expected!r} (field {field!r})")
         return key
     if name and tag_type:
         keys = query_tags(name, tag_type)
@@ -205,8 +223,9 @@ def resolve_target_tag(field, tag=None, name=None, tag_type=None, *, fetch_tag, 
             raise ValueError(f"resolved tag {key} is not a live /type/tag")
         # The target must belong in the field we write it into, and actually bear
         # the requested name - don't trust query.json's name filter (review #1).
-        if tt != field:
-            raise ValueError(f"resolved tag {key} has tag_type {tt!r}, not field {field!r}")
+        if tt != expected:
+            raise ValueError(
+                f"resolved tag {key} has tag_type {tt!r}, not {expected!r} (field {field!r})")
         if doc.get("name") != name:
             raise ValueError(f"resolved tag {key} name {doc.get('name')!r} != requested {name!r}")
         return key
@@ -338,7 +357,7 @@ def cmd_retag(args):
     try:
         tag_key = resolve_target_tag(
             args.field, tag=args.tag, name=args.name,
-            tag_type=args.tag_type or args.field,
+            tag_type=args.tag_type or _expected_tag_type(args.field),
             fetch_tag=_fetch_tag, query_tags=_query_tags,
         )
     except ValueError as e:
@@ -408,7 +427,7 @@ def build_parser():
     r.add_argument("--field", default="genres", help="work Tag field to add to (plural)")
     r.add_argument("--tag", help="target Tag OLID (preferred), e.g. OL125T")
     r.add_argument("--name", help="target Tag name (with --tag-type); must resolve to one live Tag")
-    r.add_argument("--tag-type", help="target Tag tag_type (defaults to --field)")
+    r.add_argument("--tag-type", help="target Tag tag_type, SINGULAR (e.g. genre); defaults to --field minus its 's'")
     r.add_argument("--ignore-case", action="store_true",
                    help="relax matching ONLY among works already enumerated by the exact subject")
     r.add_argument("--ignore-whitespace", action="store_true",
