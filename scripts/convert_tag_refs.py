@@ -49,6 +49,7 @@ Typical use:
 from __future__ import annotations
 
 import argparse
+import gzip
 import json
 import logging
 import re
@@ -424,6 +425,37 @@ def fetch_works_many(ol, keys: list, retries: int = 3) -> dict:
     return {}
 
 
+def find_straggler_keys(dump_lines, fields, done_keys):
+    """Post-run completeness control against the monthly works dump (L4).
+
+    A single offset sweep (even re-swept) can deterministically skip the same key, so
+    this cross-checks a source that does NOT share that blind spot: the dump. Yields
+    work keys whose any `fields` value still holds a bare "/tags/..." STRING (i.e.
+    unconverted), excluding keys the run already handled (`done_keys`). Feed the output
+    to `convert --keys` for a final pass. Works edited AFTER the dump's cutoff aren't in
+    it - they rely on the live sweep (and are caught by next month's dump).
+
+    `dump_lines` is an iterable of dump TSV rows (type\\tkey\\trev\\tlast_modified\\tjson).
+    """
+    for line in dump_lines:
+        parts = line.rstrip("\n").split("\t")
+        if len(parts) < 5:
+            continue
+        key = parts[1].strip()
+        if key in done_keys:
+            continue
+        try:
+            work = json.loads(parts[4])
+        except (json.JSONDecodeError, ValueError):
+            continue
+        for f in fields:
+            val = work.get(f)
+            if isinstance(val, list) and any(
+                    isinstance(v, str) and v.startswith("/tags/") for v in val):
+                yield key
+                break
+
+
 def classify_revision_gap(base_rev: int, current_rev):
     """Post-run verify signal (F2 backstop). The OL version API exposes no
     per-revision author, so classify by the revision gap:
@@ -442,13 +474,19 @@ def classify_revision_gap(base_rev: int, current_rev):
     return "recheck"
 
 
-def verify_audit(audit_rows, fetch_rev):
+def verify_audit(audit_rows, fetch_rev, saved_revs=None):
     """Read audit rows and return the works that need a manual re-check.
 
-    `fetch_rev(work_key) -> current_revision`. Uses the smallest base revision seen
-    per work. Over-flags benign post-run edits (it cannot tell a concurrent-edit
-    reversion from a later legitimate edit without author data), which is the safe
-    direction for a re-check list.
+    Two signals (ruling 1):
+    - EXACT, when `saved_revs[work]` (the revision save_many reported for our write)
+      is known: clean iff saved == base+1 (nobody wrote between our read and write);
+      saved > base+1 means an intervening write (possible revert) -> flag; later edits
+      after our save are NOT flagged. No network call.
+    - GAP fallback, otherwise: compare the current live revision to base. This
+      over-flags benign later edits (safe direction) and is used when the save
+      response carried no revision.
+
+    `fetch_rev(work_key) -> current_revision`. Uses the smallest base revision per work.
     """
     by_work: dict[str, int] = {}
     null_rev_works: set[str] = set()
@@ -461,16 +499,24 @@ def verify_audit(audit_rows, fetch_rev):
         by_work[work] = min(by_work.get(work, rev), rev)
     flagged = []
     for work, base in sorted(by_work.items()):
-        cur = fetch_rev(work)
-        status = classify_revision_gap(base, cur)
-        if status != "clean":
-            flagged.append({"work": work, "base_revision": base,
-                            "current_revision": cur, "status": status})
+        if saved_revs and work in saved_revs:
+            saved = saved_revs[work]
+            status = classify_revision_gap(base, saved)
+            if status != "clean":
+                flagged.append({"work": work, "base_revision": base,
+                                "saved_revision": saved, "method": "exact", "status": status})
+        else:
+            cur = fetch_rev(work)
+            status = classify_revision_gap(base, cur)
+            if status != "clean":
+                flagged.append({"work": work, "base_revision": base,
+                                "current_revision": cur, "method": "gap", "status": status})
     # L2: a work whose rows carry no base revision can't be gap-checked - surface it
     # for a manual re-check rather than silently dropping it from the backstop.
     for work in sorted(null_rev_works - by_work.keys()):
         flagged.append({"work": work, "base_revision": None,
-                        "current_revision": fetch_rev(work), "status": "unverifiable"})
+                        "current_revision": fetch_rev(work), "method": "gap",
+                        "status": "unverifiable"})
     return flagged
 
 
@@ -488,6 +534,7 @@ def run_conversion(
     pause_file=None,
     pause_poll: float = 10.0,
     refetch=None,
+    saved_revs=None,
 ) -> dict:
     """Drive the conversion over an iterable of work dicts.
 
@@ -543,7 +590,13 @@ def run_conversion(
         report["failed"] += len(failed)
         if done_fp:
             for doc in saved:
-                done_fp.write(doc["key"] + "\n")
+                k = doc["key"]
+                # Record our saved revision next to the key (ruling 1: exact verify
+                # signal). Resume reads the first tab-field, so this stays compatible.
+                if saved_revs and k in saved_revs:
+                    done_fp.write(f"{k}\t{saved_revs[k]}\n")
+                else:
+                    done_fp.write(k + "\n")
             done_fp.flush()
         for fk in failed:
             logger.error("save failed (isolated): %s", fk)
@@ -665,7 +718,24 @@ def is_transient_failure(status: int | None = None, exc: Exception | None = None
     return status == 429 or status >= 500
 
 
-def make_saver(ol, throttle: float, retries: int = 3):
+def _parse_saved_revs(resp) -> dict:
+    """Parse /api/save_many's response body into {key: revision}. Infobase returns
+    a list of {"key", "revision"} for each saved doc (infogami infobase.py). Returns
+    {} for any other shape or an unparseable body, so verify falls back to the gap
+    method (ruling 1)."""
+    try:
+        data = resp.json()
+    except Exception:  # noqa: BLE001
+        return {}
+    out = {}
+    if isinstance(data, list):
+        for item in data:
+            if isinstance(item, dict) and "key" in item and "revision" in item:
+                out[item["key"]] = item["revision"]
+    return out
+
+
+def make_saver(ol, throttle: float, retries: int = 3, saved_revs: dict | None = None):
     """Return a saver(batch, comment) -> bool.
 
     Posts the raw work dicts straight to /api/save_many via the shared
@@ -674,6 +744,9 @@ def make_saver(ol, throttle: float, retries: int = 3):
     model. Retries only TRANSIENT failures with backoff; a deterministic 4xx
     returns False at once so the bisect isolates the offending work fast. Always
     returns False (never raises) so a batch failure is handled by the bisect.
+
+    If `saved_revs` is given, the revision save_many reports for each saved doc is
+    recorded there (ruling 1: the exact verify signal).
     """
     def saver(batch, comment):
         last = None
@@ -682,6 +755,8 @@ def make_saver(ol, throttle: float, retries: int = 3):
                 r = save_many_dicts(ol, batch, comment)
                 status = getattr(r, "status_code", 500)
                 if status == 200:
+                    if saved_revs is not None:
+                        saved_revs.update(_parse_saved_revs(r))
                     if throttle:
                         time.sleep(throttle)
                     return True
@@ -787,7 +862,8 @@ def cmd_convert(args):
 
     already_done = set()
     if args.done and Path(args.done).exists():
-        already_done = {l.strip() for l in open(args.done) if l.strip()}
+        # A done line is "key" or "key\t<saved_rev>" (ruling 1); take the key.
+        already_done = {l.split("\t")[0].strip() for l in open(args.done) if l.strip()}
         logger.info("resuming: %d keys already done", len(already_done))
 
     keys = [l.strip() for l in open(args.keys) if l.strip() and l.strip() not in already_done]
@@ -803,7 +879,10 @@ def cmd_convert(args):
                 logger.error("fetch failed %s: %s", k, e)
 
     ol = get_ol_session() if args.write else None
-    saver = make_saver(ol, args.throttle) if args.write else (lambda b, c: True)
+    # Ruling 1: record the revision save_many reports for each saved doc, so verify
+    # can use the exact signal (saved_rev vs base_rev) instead of the live-revision gap.
+    saved_revs = {} if args.write else None
+    saver = make_saver(ol, args.throttle, saved_revs=saved_revs) if args.write else (lambda b, c: True)
     # F2: on a real run, re-fetch each batch right before saving (uses the run's
     # session). Only needed when writing; dry-run never reaches the save path.
     refetch = (lambda batch_keys: fetch_works_many(ol, batch_keys)) if args.write else None
@@ -819,6 +898,7 @@ def cmd_convert(args):
             write=args.write, batch_size=args.batch_size, run_id=run_id,
             comment=comment, audit_fp=audit_fp, done_fp=done_fp,
             pause_file=args.pause_file, pause_poll=args.pause_poll, refetch=refetch,
+            saved_revs=saved_revs,
         )
     finally:
         if audit_fp:
@@ -878,12 +958,25 @@ def cmd_undo(args):
 
 
 def cmd_verify(args):
-    """Post-run backstop for F2: read the audit log and flag works whose live
-    revision has advanced beyond our edit, i.e. an edit landed that we may have
-    reverted (the OL version API carries no per-revision author, so this is by
-    revision gap - it over-flags benign later edits, which is safe for a re-check
-    list). Writes the flagged keys to --out (one per line) if given."""
+    """Post-run backstop for F2: read the audit log and flag works needing a re-check.
+
+    With --done (ruling 1), the revision save_many reported for each saved work gives
+    the EXACT signal (saved_rev vs base_rev) with no network call. Without it (or for
+    works the done-file didn't record a revision for), it falls back to comparing the
+    current live revision to base (the gap method, which over-flags benign later edits).
+    Writes the flagged keys to --out (one per line) if given."""
     rows = [json.loads(l) for l in open(args.audit) if l.strip()]
+
+    saved_revs = {}
+    if args.done and Path(args.done).exists():
+        for l in open(args.done):
+            parts = l.rstrip("\n").split("\t")
+            if len(parts) >= 2 and parts[1].strip():
+                try:
+                    saved_revs[parts[0].strip()] = int(parts[1].strip())
+                except ValueError:
+                    pass
+        logger.info("verify: %d saved revisions from --done (exact signal)", len(saved_revs))
 
     def fetch_rev(key):
         try:
@@ -892,15 +985,38 @@ def cmd_verify(args):
             logger.error("verify fetch failed %s: %s", key, e)
             return None
 
-    flagged = verify_audit(rows, fetch_rev)
+    flagged = verify_audit(rows, fetch_rev, saved_revs=saved_revs)
     for f in flagged:
-        logger.info("RECHECK %s base=%s current=%s (%s)",
-                    f["work"], f["base_revision"], f["current_revision"], f["status"])
+        rev = f.get("saved_revision", f.get("current_revision"))
+        logger.info("RECHECK %s base=%s %s=%s via %s (%s)",
+                    f["work"], f["base_revision"],
+                    "saved" if f.get("method") == "exact" else "current", rev,
+                    f.get("method"), f["status"])
     logger.info("verify: %d audit rows, %d works flagged for re-check", len(rows), len(flagged))
     if args.out:
         with open(args.out, "w") as fh:
             for f in flagged:
                 fh.write(f["work"] + "\n")
+
+
+def cmd_dump_stragglers(args):
+    """L4 post-run completeness check: list works the monthly dump shows still holding
+    a bare /tags/ string, minus the ones this run converted (--done). Feed --out to
+    `convert --keys` for a final pass."""
+    fields = [f.strip() for f in args.fields.split(",") if f.strip()]
+    done_keys = set()
+    if args.done and Path(args.done).exists():
+        done_keys = {l.split("\t")[0].strip() for l in open(args.done) if l.strip()}
+    out = open(args.out, "w") if args.out else sys.stdout
+    n = 0
+    with gzip.open(args.dump, "rt", errors="replace") as f:
+        for key in find_straggler_keys(f, fields, done_keys):
+            out.write(key + "\n")
+            n += 1
+    if args.out:
+        out.close()
+    logger.info("dump-stragglers: %d works in %s still hold a bare /tags/ string and are "
+                "not in --done (feed --out to `convert --keys`)", n, fields)
 
 
 def parser_error(msg):
@@ -949,8 +1065,18 @@ def build_parser():
     v = sub.add_parser("verify", help="flag audited works whose revision advanced beyond "
                                       "our edit (F2 backstop; read-only)")
     v.add_argument("--audit", required=True)
+    v.add_argument("--done", help="run's done-file (key<TAB>saved_rev) for the exact signal")
     v.add_argument("--out", help="write flagged work keys here (one per line)")
     v.set_defaults(func=cmd_verify)
+
+    d = sub.add_parser("dump-stragglers",
+                       help="post-run completeness check (L4): works in the monthly dump "
+                            "still holding bare /tags/ strings, minus --done")
+    d.add_argument("--dump", required=True, help="path to ol_dump_works_latest.txt.gz")
+    d.add_argument("--fields", default="genres,subgenres")
+    d.add_argument("--done", help="run's done-file; its keys are excluded (already converted)")
+    d.add_argument("--out", help="write straggler keys here (feed to `convert --keys`)")
+    d.set_defaults(func=cmd_dump_stragglers)
     return p
 
 

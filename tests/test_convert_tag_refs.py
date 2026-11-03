@@ -692,3 +692,97 @@ class TestEnumerateMaxKeysWarns:
             ctr.cmd_enumerate(args)
         assert any("--max-keys" in r.message and r.levelname == "WARNING"
                    for r in caplog.records)
+
+
+class _SaveResp:
+    def __init__(self, status, payload):
+        self.status_code = status
+        self._payload = payload
+        self.text = ""
+
+    def json(self):
+        if isinstance(self._payload, Exception):
+            raise self._payload
+        return self._payload
+
+
+class TestParseSavedRevs:
+    def test_list_of_key_revision(self):
+        resp = _SaveResp(200, [{"key": "/works/OL1W", "revision": 8},
+                               {"key": "/works/OL2W", "revision": 3}])
+        assert ctr._parse_saved_revs(resp) == {"/works/OL1W": 8, "/works/OL2W": 3}
+
+    def test_non_list_yields_empty(self):
+        assert ctr._parse_saved_revs(_SaveResp(200, {"status": "ok"})) == {}
+
+    def test_unparseable_yields_empty(self):
+        assert ctr._parse_saved_revs(_SaveResp(200, ValueError("nope"))) == {}
+
+
+class TestMakeSaverRecordsRevs:
+    def test_saver_records_saved_revisions(self, monkeypatch):
+        monkeypatch.setattr(ctr.time, "sleep", lambda *_: None)
+        monkeypatch.setattr(ctr, "save_many_dicts",
+                            lambda ol, b, c: _SaveResp(200, [{"key": "/works/OL1W", "revision": 8}]))
+        saved_revs = {}
+        saver = ctr.make_saver(ol=None, throttle=0, saved_revs=saved_revs)
+        assert saver([{"key": "/works/OL1W"}], "c") is True
+        assert saved_revs == {"/works/OL1W": 8}
+
+
+class TestVerifyAuditExact:
+    """Ruling 1: with our saved revision recorded, verify uses the EXACT signal
+    (saved_rev vs base_rev), not the over-flagging live-revision gap."""
+
+    def test_exact_clean_when_saved_is_base_plus_one(self):
+        rows = [{"work": "/works/OL1W", "revision": 7}]
+        # live revision has moved far ahead (a later benign edit) - gap would flag it,
+        # but exact knows our save was base+1, so it is clean.
+        flagged = ctr.verify_audit(rows, lambda k: 99, saved_revs={"/works/OL1W": 8})
+        assert flagged == []
+
+    def test_exact_flags_intervening_write(self):
+        rows = [{"work": "/works/OL1W", "revision": 7}]
+        flagged = ctr.verify_audit(rows, lambda k: 9, saved_revs={"/works/OL1W": 9})
+        assert len(flagged) == 1
+        assert flagged[0]["status"] == "recheck"
+        assert flagged[0]["method"] == "exact"
+        assert flagged[0]["saved_revision"] == 9
+
+    def test_falls_back_to_gap_when_no_saved_rev(self):
+        rows = [{"work": "/works/OL2W", "revision": 4}]
+        flagged = ctr.verify_audit(rows, lambda k: 6, saved_revs={})  # OL2W not recorded
+        assert len(flagged) == 1
+        assert flagged[0]["status"] == "recheck"
+        assert flagged[0]["method"] == "gap"
+
+
+class TestFindStragglerKeys:
+    """Ruling 2 / L4: a dump-based completeness control that does not share offset
+    paging's blind spot. A 'straggler' is a work still holding a bare /tags/ STRING
+    in a target field, that the run did not already convert (not in --done)."""
+
+    def _line(self, key, work):
+        import json as _j
+        # dump row: type \t key \t revision \t last_modified \t json
+        return f"/type/work\t{key}\t1\t2026-01-01\t{_j.dumps(work)}\n"
+
+    def test_bare_string_in_genres_is_a_straggler(self):
+        lines = [self._line("/works/OL1W", {"genres": ["/tags/OL9T"]})]
+        assert list(ctr.find_straggler_keys(lines, ["genres", "subgenres"], set())) == ["/works/OL1W"]
+
+    def test_ref_only_is_not_a_straggler(self):
+        lines = [self._line("/works/OL1W", {"genres": [{"key": "/tags/OL9T"}]})]
+        assert list(ctr.find_straggler_keys(lines, ["genres"], set())) == []
+
+    def test_done_key_is_excluded(self):
+        lines = [self._line("/works/OL1W", {"genres": ["/tags/OL9T"]})]
+        assert list(ctr.find_straggler_keys(lines, ["genres"], {"/works/OL1W"})) == []
+
+    def test_bare_string_in_subgenres_is_a_straggler(self):
+        lines = [self._line("/works/OL2W", {"genres": [{"key": "/tags/OL1T"}],
+                                            "subgenres": ["/tags/OL5T"]})]
+        assert list(ctr.find_straggler_keys(lines, ["genres", "subgenres"], set())) == ["/works/OL2W"]
+
+    def test_malformed_line_is_skipped(self):
+        assert list(ctr.find_straggler_keys(["garbage\tno\tjson\n"], ["genres"], set())) == []
