@@ -14,6 +14,7 @@ All tests are offline: network is injected via fakes.
 
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -419,6 +420,18 @@ class TestUndoDecision:
         live = [{"key": "/tags/OL1T"}, {"key": "/tags/OL2T"}]  # librarian edit
         assert ctr.undo_decision(live, before, after) == "skip-conflict"
 
+    def test_absent_live_with_empty_before_is_noop_not_conflict(self):
+        # re-undo of a tag added to a previously-absent field: first undo removed the
+        # key (B2), so live is now absent (None). before==[] means "no tags", so this
+        # is already undone -> noop, not a false conflict.
+        after = [{"key": "/tags/OL1T"}]
+        assert ctr.undo_decision(None, [], after) == "skip-noop"
+
+    def test_absent_live_with_nonempty_before_is_still_conflict(self):
+        # a field we had real content for is now gone -> genuine conflict, don't clobber
+        after = [{"key": "/tags/OL1T"}, {"key": "/tags/OL2T"}]
+        assert ctr.undo_decision(None, ["/tags/OL1T"], after) == "skip-conflict"
+
 
 class TestUndoOrdering:
     def test_newest_first(self):
@@ -656,3 +669,26 @@ class TestVerifyAudit:
         flagged = ctr.verify_audit(rows, lambda k: current.get(k))
         assert {f["work"]: f["status"] for f in flagged} == {
             "/works/OL2W": "recheck", "/works/OL3W": "anomaly"}
+
+    def test_null_revision_row_is_surfaced_not_dropped(self):
+        # L2: a row with no base revision cannot be gap-checked; it must appear on the
+        # re-check list as 'unverifiable', not silently vanish from the backstop.
+        rows = [{"work": "/works/OL9W", "revision": None}]
+        flagged = ctr.verify_audit(rows, lambda k: 5)
+        assert [f["work"] for f in flagged] == ["/works/OL9W"]
+        assert flagged[0]["status"] == "unverifiable"
+
+
+class TestEnumerateMaxKeysWarns:
+    """L1: the --max-keys sampling path skips the completeness guard, so it must warn
+    loudly that the snapshot is not verified for completeness."""
+
+    def test_max_keys_logs_a_warning(self, monkeypatch, caplog):
+        monkeypatch.setattr(ctr, "enumerate_work_keys",
+                            lambda field, max_keys=None, throttle=0.0: iter(["/works/OL1W"]))
+        args = SimpleNamespace(field="genres", out=None, max_keys=5,
+                               max_passes=5, throttle=0.0)
+        with caplog.at_level("WARNING"):
+            ctr.cmd_enumerate(args)
+        assert any("--max-keys" in r.message and r.levelname == "WARNING"
+                   for r in caplog.records)

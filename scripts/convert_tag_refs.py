@@ -451,11 +451,13 @@ def verify_audit(audit_rows, fetch_rev):
     direction for a re-check list.
     """
     by_work: dict[str, int] = {}
+    null_rev_works: set[str] = set()
     for r in audit_rows:
         rev = r.get("revision")
-        if rev is None:
-            continue
         work = r["work"]
+        if rev is None:
+            null_rev_works.add(work)
+            continue
         by_work[work] = min(by_work.get(work, rev), rev)
     flagged = []
     for work, base in sorted(by_work.items()):
@@ -464,6 +466,11 @@ def verify_audit(audit_rows, fetch_rev):
         if status != "clean":
             flagged.append({"work": work, "base_revision": base,
                             "current_revision": cur, "status": status})
+    # L2: a work whose rows carry no base revision can't be gap-checked - surface it
+    # for a manual re-check rather than silently dropping it from the backstop.
+    for work in sorted(null_rev_works - by_work.keys()):
+        flagged.append({"work": work, "base_revision": None,
+                        "current_revision": fetch_rev(work), "status": "unverifiable"})
     return flagged
 
 
@@ -714,6 +721,12 @@ def undo_decision(live_value, before, after) -> str:
         "skip-conflict" - live is something else: edited since our run - do NOT
                           clobber it (dewey #2)
     """
+    # An absent field and an empty list are equivalent in our model (a tag added to an
+    # absent field is undone by REMOVING the key), so a re-undo sees live=None; treat
+    # it as [] when `before` is also empty, so the re-run reports noop, not a false
+    # conflict. (When `before` is non-empty, a now-absent field is a real conflict.)
+    if live_value is None and not before:
+        live_value = before
     if live_value == after:
         return "restore"
     if live_value == before:
@@ -732,6 +745,9 @@ def order_undo_rows(rows):
 def cmd_enumerate(args):
     if args.max_keys:
         # Sampling/test mode: a single capped, streamed pass (no completeness guard).
+        logger.warning("--max-keys: single capped sweep, NO completeness guard - this "
+                       "snapshot is NOT verified complete; do not feed it to a real "
+                       "--write run. Omit --max-keys for the converged full sweep.")
         out = open(args.out, "w") if args.out else sys.stdout
         n = 0
         for key in enumerate_work_keys(args.field, max_keys=args.max_keys, throttle=args.throttle):
