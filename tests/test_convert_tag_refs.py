@@ -852,3 +852,42 @@ class TestLoginIdentityAssertion:
     def test_assert_rejects_unauthenticated(self):
         with pytest.raises(SystemExit):
             ctr.assert_logged_in_as(_FakeOL(None), "openlibrarytagbot")
+class TestUndoRemovesPreviouslyAbsentField:
+    """B2: undoing a tag added to a previously-absent field should REMOVE the key,
+    not leave an empty list behind."""
+
+    def test_restoring_empty_before_removes_the_key(self, monkeypatch):
+        live = {"key": "/works/OL1W", "type": {"key": "/type/work"},
+                "genres": [{"key": "/tags/OL1T"}]}   # our added tag is live
+        monkeypatch.setattr(ctr, "fetch_work", lambda k: dict(live))
+        saved = []
+        rows = [{"work": "/works/OL1W", "field": "genres",
+                 "before": [], "after": [{"key": "/tags/OL1T"}], "run_id": "r"}]
+        counts = ctr.apply_undo(rows, lambda batch, comment: saved.append(batch[0]) or True,
+                                write=True)
+        assert counts["restored"] == 1
+        assert "genres" not in saved[0]      # key removed, not left as []
+
+    def test_restoring_nonempty_before_still_sets_it(self, monkeypatch):
+        live = {"key": "/works/OL1W", "type": {"key": "/type/work"},
+                "genres": [{"key": "/tags/OL1T"}, {"key": "/tags/OL2T"}]}
+        monkeypatch.setattr(ctr, "fetch_work", lambda k: dict(live))
+        saved = []
+        rows = [{"work": "/works/OL1W", "field": "genres",
+                 "before": [{"key": "/tags/OL1T"}],
+                 "after": [{"key": "/tags/OL1T"}, {"key": "/tags/OL2T"}], "run_id": "r"}]
+        ctr.apply_undo(rows, lambda batch, comment: saved.append(batch[0]) or True, write=True)
+        assert saved[0]["genres"] == [{"key": "/tags/OL1T"}]   # non-empty restore unchanged
+
+    def test_second_undo_of_absent_field_is_noop_not_conflict(self, monkeypatch):
+        # double-undo: after the first undo removed the key, a re-run sees the field
+        # absent and must report noop, not a false "edited since run" conflict.
+        live = {"key": "/works/OL1W", "type": {"key": "/type/work"}}  # key already gone
+        monkeypatch.setattr(ctr, "fetch_work", lambda k: dict(live))
+        saved = []
+        rows = [{"work": "/works/OL1W", "field": "genres",
+                 "before": [], "after": [{"key": "/tags/OL1T"}], "run_id": "r"}]
+        counts = ctr.apply_undo(rows, lambda batch, comment: saved.append(batch[0]) or True,
+                                write=True)
+        assert counts == {"restored": 0, "noop": 1, "conflict": 0, "error": 0}
+        assert saved == []

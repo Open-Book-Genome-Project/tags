@@ -1002,7 +1002,13 @@ def apply_undo(rows, saver, write: bool) -> dict:
             logger.warning("undo SKIP (edited since run): %s %s is %r, not our %r",
                            row["work"], row["field"], work.get(row["field"]), row["after"])
             continue
-        work[row["field"]] = row["before"]
+        if row["before"]:
+            work[row["field"]] = row["before"]
+        else:
+            # B2: the field was previously absent/empty; remove the key rather than
+            # leave an empty list ([] and an absent key are equivalent). convert never
+            # writes an empty "before", so this only affects bulk_retag's add-to-absent.
+            work.pop(row["field"], None)
         comment = f"Undo {row.get('run_id', '?')} ({run_id})"
         if write:
             if saver([work], comment):
