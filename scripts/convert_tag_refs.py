@@ -343,6 +343,130 @@ def _wait_while_paused(pause_file, poll: float = 10.0, _sleep=time.sleep, _exist
     return True
 
 
+def _stamp_audit_row(row: dict, run_id: str, comment: str) -> None:
+    """Attach run metadata to an audit row (shared by the main loop and the F2
+    re-convert path)."""
+    row["run_id"] = run_id
+    row["comment"] = comment
+    row["ts"] = datetime.now(timezone.utc).isoformat()
+
+
+def recheck_batch(docs, rows, fields, resolver: TagResolver, refetch,
+                  run_id: str, comment: str, report: dict):
+    """Re-fetch a batch right before the save and reconcile it against the live
+    revision, so no work is saved from a stale copy (F2).
+
+    For each pending doc: if the live revision equals the one we converted from,
+    keep our converted doc; if it moved, re-convert from the fresh copy (preserving
+    the concurrent edit) or drop it if it no longer needs changing; if it is gone,
+    drop it. If the re-fetch returns nothing at all (a fetch failure), the whole
+    batch is skipped so nothing is saved unverified - resume re-attempts it.
+
+    Returns (final_docs, final_rows).
+    """
+    keys = [d["key"] for d in docs]
+    fresh = refetch(keys)
+    if not fresh:
+        logger.error("re-check: re-fetch returned nothing for %d works; NOT saving this "
+                     "batch (resume will re-attempt it)", len(keys))
+        return [], []
+    rows_by_key: dict[str, list] = {}
+    for r in rows:
+        rows_by_key.setdefault(r["work"], []).append(r)
+    final_docs: list[dict] = []
+    final_rows: list[dict] = []
+    for d in docs:
+        key = d["key"]
+        base_rev = d.get("revision")
+        cur = fresh.get(key)
+        if cur is None:
+            report["stale_dropped"] += 1
+            logger.warning("re-check: %s not returned by re-fetch (deleted/merged?); dropped", key)
+            continue
+        if cur.get("revision") == base_rev:
+            final_docs.append(d)
+            final_rows.extend(rows_by_key.get(key, []))
+            continue
+        logger.warning("re-check: %s revision %s->%s since convert; re-converting from the "
+                       "fresh copy", key, base_rev, cur.get("revision"))
+        r2 = convert_work(cur, fields, resolver)
+        if r2.status != "changed":
+            report["stale_dropped"] += 1
+            logger.info("re-check: %s is %s after re-convert; dropped from batch", key, r2.status)
+            continue
+        report["reconverted"] += 1
+        for row in r2.audit_rows:
+            _stamp_audit_row(row, run_id, comment)
+        final_docs.append(r2.new_work)
+        final_rows.extend(r2.audit_rows)
+    return final_docs, final_rows
+
+
+def fetch_works_many(ol, keys: list, retries: int = 3) -> dict:
+    """Bulk re-fetch works via /api/get_many using the run's session; returns
+    {key: work}. Missing keys are omitted. Returns {} on repeated failure (the
+    caller then skips the batch rather than saving unverified)."""
+    import json as _json
+    params = {"keys": _json.dumps(keys)}
+    for attempt in range(retries):
+        try:
+            resp = ol.session.get(f"{ol.base_url}/api/get_many", params=params, timeout=60)
+            resp.raise_for_status()
+            data = resp.json()
+            if data.get("status") == "ok":
+                return data.get("result", {})
+            logger.warning("re-fetch /api/get_many status=%s; retry %d/%d",
+                           data.get("status"), attempt + 1, retries)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("re-fetch batch failed (%s); retry %d/%d", e, attempt + 1, retries)
+            time.sleep(2 ** attempt)
+    logger.error("re-fetch failed after %d tries for %d keys", retries, len(keys))
+    return {}
+
+
+def classify_revision_gap(base_rev: int, current_rev):
+    """Post-run verify signal (F2 backstop). The OL version API exposes no
+    per-revision author, so classify by the revision gap:
+    - current == base + 1  -> 'clean'      (our edit is the only change since we read it)
+    - current  > base + 1  -> 'recheck'    (other revision(s) landed; maybe a concurrent
+                                            edit we reverted, maybe benign later edits)
+    - current <= base      -> 'anomaly'    (our edit missing / rolled back)
+    - current is None      -> 'unfetchable'
+    """
+    if current_rev is None:
+        return "unfetchable"
+    if current_rev <= base_rev:
+        return "anomaly"
+    if current_rev == base_rev + 1:
+        return "clean"
+    return "recheck"
+
+
+def verify_audit(audit_rows, fetch_rev):
+    """Read audit rows and return the works that need a manual re-check.
+
+    `fetch_rev(work_key) -> current_revision`. Uses the smallest base revision seen
+    per work. Over-flags benign post-run edits (it cannot tell a concurrent-edit
+    reversion from a later legitimate edit without author data), which is the safe
+    direction for a re-check list.
+    """
+    by_work: dict[str, int] = {}
+    for r in audit_rows:
+        rev = r.get("revision")
+        if rev is None:
+            continue
+        work = r["work"]
+        by_work[work] = min(by_work.get(work, rev), rev)
+    flagged = []
+    for work, base in sorted(by_work.items()):
+        cur = fetch_rev(work)
+        status = classify_revision_gap(base, cur)
+        if status != "clean":
+            flagged.append({"work": work, "base_revision": base,
+                            "current_revision": cur, "status": status})
+    return flagged
+
+
 def run_conversion(
     works,
     fields,
@@ -356,15 +480,20 @@ def run_conversion(
     done_fp=None,
     pause_file=None,
     pause_poll: float = 10.0,
+    refetch=None,
 ) -> dict:
     """Drive the conversion over an iterable of work dicts.
 
     `saver(batch, comment) -> bool` is only ever called when write is True.
-    Returns a summary report with per-category counts.
+    `refetch(keys) -> {key: work}` (optional) re-fetches the batch immediately
+    before the save so a work whose revision moved since we converted it is
+    re-converted from the fresh copy rather than saved stale (F2). Returns a
+    summary report with per-category counts.
     """
     report = {
         "run_id": run_id, "would_change": 0, "saved": 0, "failed": 0,
         "nochange": 0, "skipped": 0, "redirects": 0, "drops": 0,
+        "reconverted": 0, "stale_dropped": 0,
     }
     batch: list[dict] = []
     pending_audit: list[dict] = []
@@ -381,7 +510,18 @@ def run_conversion(
             return
         # Honor an operator pause BEFORE touching the audit log or saving, so a
         # paused run leaves no half-written batch (the deploy->retype window).
+        # (Pause goes here, NOT between the re-check and the save below, so nothing
+        # widens the F2 window.)
         _wait_while_paused(pause_file, pause_poll)
+        # F2: re-fetch the batch and drop/re-convert any work whose revision moved
+        # since we converted it, so we never save from a stale copy. This runs as
+        # late as possible - immediately before the save, with no sleep between -
+        # so the residual window is only re-check -> save.
+        if refetch is not None:
+            docs, rows = recheck_batch(docs, rows, fields, resolver, refetch,
+                                       run_id, comment, report)
+            if not docs:
+                return
         # Audit-before-save (adversarial review M3): write the intended changes
         # FIRST, so a crash mid-flush still leaves a reversible record. Undo is
         # idempotent, so an audit row for a save that then fails is harmless
@@ -413,9 +553,7 @@ def run_conversion(
         # changed
         report["would_change"] += 1
         for row in res.audit_rows:
-            row["run_id"] = run_id
-            row["comment"] = comment
-            row["ts"] = datetime.now(timezone.utc).isoformat()
+            _stamp_audit_row(row, run_id, comment)
             report["redirects"] += sum(1 for r in row["resolutions"] if r["action"] == "redirect")
             report["drops"] += sum(1 for r in row["resolutions"] if r["action"] == "drop")
             if not write:
@@ -650,6 +788,9 @@ def cmd_convert(args):
 
     ol = get_ol_session() if args.write else None
     saver = make_saver(ol, args.throttle) if args.write else (lambda b, c: True)
+    # F2: on a real run, re-fetch each batch right before saving (uses the run's
+    # session). Only needed when writing; dry-run never reaches the save path.
+    refetch = (lambda batch_keys: fetch_works_many(ol, batch_keys)) if args.write else None
 
     # Audit and done-file are reversibility/resume artifacts of a real run; a
     # dry-run must not append to them (adversarial review L4). Dry-run shows its
@@ -661,7 +802,7 @@ def cmd_convert(args):
             works=works_iter(), fields=fields, resolver=resolver, saver=saver,
             write=args.write, batch_size=args.batch_size, run_id=run_id,
             comment=comment, audit_fp=audit_fp, done_fp=done_fp,
-            pause_file=args.pause_file, pause_poll=args.pause_poll,
+            pause_file=args.pause_file, pause_poll=args.pause_poll, refetch=refetch,
         )
     finally:
         if audit_fp:
@@ -674,6 +815,16 @@ def cmd_convert(args):
 
 
 def cmd_undo(args):
+    """Reverse a run from its audit log.
+
+    F5 - ordering matters: undo restores the prior **string** form of each field. A
+    save holding strings is only accepted while production `/type/work` does NOT
+    declare the field with `expected_type /type/tag`; once declared, Infobase rejects
+    a string-form save and undo cannot reverse those works. Note #14229 edits
+    `work.type` in the repo, and a deploy does NOT change prod's `/type/work`
+    document (it is rev 14 in the database) - so this risk only arises if someone
+    declares the field by hand. Run undo BEFORE any such declaration.
+    """
     run_id = f"undo-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}"
     rows = order_undo_rows([json.loads(l) for l in open(args.audit) if l.strip()])
     logger.info("undo: %d audit rows, newest-first (write=%s)", len(rows), args.write)
@@ -708,6 +859,32 @@ def cmd_undo(args):
             logger.info("[DRY] undo %s %s -> %s", row["work"], row["field"], row["before"])
             counts["restored"] += 1
     logger.info("undo DONE%s: %s", "" if args.write else " (dry-run)", json.dumps(counts))
+
+
+def cmd_verify(args):
+    """Post-run backstop for F2: read the audit log and flag works whose live
+    revision has advanced beyond our edit, i.e. an edit landed that we may have
+    reverted (the OL version API carries no per-revision author, so this is by
+    revision gap - it over-flags benign later edits, which is safe for a re-check
+    list). Writes the flagged keys to --out (one per line) if given."""
+    rows = [json.loads(l) for l in open(args.audit) if l.strip()]
+
+    def fetch_rev(key):
+        try:
+            return fetch_work(key).get("revision")
+        except Exception as e:  # noqa: BLE001
+            logger.error("verify fetch failed %s: %s", key, e)
+            return None
+
+    flagged = verify_audit(rows, fetch_rev)
+    for f in flagged:
+        logger.info("RECHECK %s base=%s current=%s (%s)",
+                    f["work"], f["base_revision"], f["current_revision"], f["status"])
+    logger.info("verify: %d audit rows, %d works flagged for re-check", len(rows), len(flagged))
+    if args.out:
+        with open(args.out, "w") as fh:
+            for f in flagged:
+                fh.write(f["work"] + "\n")
 
 
 def parser_error(msg):
@@ -745,11 +922,19 @@ def build_parser():
                    help="seconds between checks of --pause-file (default: 10)")
     c.set_defaults(func=cmd_convert)
 
-    u = sub.add_parser("undo", help="restore previous values from an audit log")
+    u = sub.add_parser("undo", help="restore previous values from an audit log (lossless "
+                                    "only while prod /type/work does NOT declare the field; "
+                                    "run undo before any hand declaration - see #14229)")
     u.add_argument("--audit", required=True)
     u.add_argument("--write", action="store_true")
     u.add_argument("--throttle", type=float, default=1.0)
     u.set_defaults(func=cmd_undo)
+
+    v = sub.add_parser("verify", help="flag audited works whose revision advanced beyond "
+                                      "our edit (F2 backstop; read-only)")
+    v.add_argument("--audit", required=True)
+    v.add_argument("--out", help="write flagged work keys here (one per line)")
+    v.set_defaults(func=cmd_verify)
     return p
 
 

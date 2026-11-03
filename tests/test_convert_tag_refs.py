@@ -550,3 +550,109 @@ class TestEnumerateConverged:
         assert len(keys) == 3            # one new per pass, capped at max_passes
         assert per_pass_new == [1, 1, 1]
         assert any("did not converge" in r.message.lower() for r in caplog.records)
+
+
+class TestRecheckBeforeFlush:
+    """F2: immediately before each flush, re-fetch the batch and never save a work
+    from a stale copy whose revision moved since we converted it. The window shrinks
+    to re-check -> save (infobase has no conditional write, so it cannot be closed)."""
+
+    def _run(self, works, refetch, calls):
+        def saver(batch, comment):
+            calls.append([dict(d) for d in batch])
+            return True
+        return ctr.run_conversion(
+            works=works, fields=["genres"], resolver=ctr.TagResolver(fetch=fake_fetch),
+            saver=saver, write=True, batch_size=100, run_id="r", comment="c",
+            refetch=refetch)
+
+    def test_unchanged_revision_saves_the_converted_doc(self):
+        calls = []
+        rep = self._run([base_work()], lambda keys: {"/works/OL1W": base_work()}, calls)
+        assert len(calls) == 1
+        assert calls[0][0]["genres"] == [{"key": "/tags/OL1T"}, {"key": "/tags/OL2T"}]
+        assert rep["saved"] == 1
+
+    def test_moved_revision_is_reconverted_from_fresh_not_saved_stale(self):
+        calls = []
+        fresh = base_work()
+        fresh["revision"] = 9                 # a concurrent edit landed since we read rev 7
+        fresh["title"] = "Edited Title"       # their change to another field
+        rep = self._run([base_work()], lambda keys: {"/works/OL1W": fresh}, calls)
+        assert len(calls) == 1
+        saved = calls[0][0]
+        assert saved["title"] == "Edited Title"   # the concurrent edit is PRESERVED (fresh base)
+        assert saved["genres"] == [{"key": "/tags/OL1T"}, {"key": "/tags/OL2T"}]
+        assert rep["reconverted"] == 1
+
+    def test_moved_revision_already_refs_is_dropped(self):
+        calls = []
+        fresh = base_work()
+        fresh["revision"] = 9
+        fresh["genres"] = [{"key": "/tags/OL1T"}, {"key": "/tags/OL2T"}]  # already converted
+        rep = self._run([base_work()], lambda keys: {"/works/OL1W": fresh}, calls)
+        assert calls == []
+        assert rep["stale_dropped"] == 1
+
+    def test_missing_on_refetch_is_dropped(self):
+        calls = []
+        rep = self._run([base_work()], lambda keys: {"/works/OLotherW": base_work()}, calls)
+        assert calls == []
+        assert rep["stale_dropped"] == 1
+
+    def test_empty_refetch_skips_batch_without_saving(self):
+        calls = []
+        rep = self._run([base_work()], lambda keys: {}, calls)   # re-fetch failed entirely
+        assert calls == []
+        assert rep["saved"] == 0
+
+    def test_no_sleep_between_recheck_and_save(self, monkeypatch):
+        events = []
+        monkeypatch.setattr(ctr.time, "sleep", lambda s: events.append(("sleep", s)))
+
+        def refetch(keys):
+            events.append(("refetch", tuple(keys)))
+            return {"/works/OL1W": base_work()}
+
+        def saver(batch, comment):
+            events.append(("save", len(batch)))
+            return True
+
+        ctr.run_conversion(
+            works=[base_work()], fields=["genres"],
+            resolver=ctr.TagResolver(fetch=fake_fetch), saver=saver, write=True,
+            batch_size=100, run_id="r", comment="c", refetch=refetch)
+        kinds = [e[0] for e in events]
+        i, j = kinds.index("refetch"), kinds.index("save")
+        assert j == i + 1          # the save immediately follows the re-check; no sleep between
+
+
+class TestClassifyRevisionGap:
+    def test_clean_when_our_edit_is_the_only_change(self):
+        assert ctr.classify_revision_gap(7, 8) == "clean"
+
+    def test_recheck_when_extra_revisions_landed(self):
+        assert ctr.classify_revision_gap(7, 9) == "recheck"
+
+    def test_anomaly_when_not_advanced(self):
+        assert ctr.classify_revision_gap(7, 7) == "anomaly"
+        assert ctr.classify_revision_gap(7, 6) == "anomaly"
+
+    def test_unfetchable_when_none(self):
+        assert ctr.classify_revision_gap(7, None) == "unfetchable"
+
+
+class TestVerifyAudit:
+    """verify reads the audit log and flags works to re-check. The OL version API
+    exposes no per-revision author, so it flags by revision gap (conservative)."""
+
+    def test_flags_only_works_needing_recheck(self):
+        rows = [
+            {"work": "/works/OL1W", "revision": 7},   # current 8 -> clean (not flagged)
+            {"work": "/works/OL2W", "revision": 4},   # current 6 -> recheck
+            {"work": "/works/OL3W", "revision": 2},   # current 2 -> anomaly
+        ]
+        current = {"/works/OL1W": 8, "/works/OL2W": 6, "/works/OL3W": 2}
+        flagged = ctr.verify_audit(rows, lambda k: current.get(k))
+        assert {f["work"]: f["status"] for f in flagged} == {
+            "/works/OL2W": "recheck", "/works/OL3W": "anomaly"}
