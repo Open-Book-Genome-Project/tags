@@ -124,7 +124,9 @@ def apply_retag(work, field, tag_key, matched_subject, resolver, strip_subject=F
     Returns a new work with only those fields changed, nochange, or skipped.
     """
     work_key = work.get("key", "<unknown>")
-    before_field = work.get(field, [])
+    # `or []` (not a .get default) so a present-but-null field counts as empty and
+    # is tagged, not skipped - symmetric with the subjects handling below (B1).
+    before_field = work.get(field) or []
 
     norm = normalize_field(before_field, resolver)
     if norm.unclassifiable:

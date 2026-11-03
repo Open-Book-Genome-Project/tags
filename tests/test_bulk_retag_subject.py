@@ -79,6 +79,14 @@ class TestApplyRetag:
         assert res.new_work["subtitle"] == ""
         assert res.new_work["subjects"] == ["Biography"]
 
+    def test_target_field_null_is_treated_as_empty_not_skipped(self):
+        # a work carrying the subject but with genres stored as JSON null must be
+        # tagged, not skipped (B1): symmetric with how subjects:null is tolerated.
+        w = work(["Biography"]); w["genres"] = None
+        res = brs.apply_retag(w, "genres", TAG, "Biography", LIVE)
+        assert res.status == "changed"
+        assert res.new_work["genres"] == [{"key": TAG}]
+
     def test_merges_with_existing_both_shapes_dedupe(self):
         w = work(["Biography"]); w["genres"] = ["/tags/OL1T", {"key": "/tags/OL2T"}]
         res = brs.apply_retag(w, "genres", TAG, "Biography", LIVE)
