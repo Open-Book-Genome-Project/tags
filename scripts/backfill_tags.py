@@ -16,6 +16,7 @@ Phase 2 - Fetch, migrate, save (dry-run default until schema is ready):
 import argparse
 import gzip
 import json
+import re
 import sys
 import time
 import logging
@@ -68,18 +69,31 @@ def work_field_for(tag_type: str) -> str:
         )
 
 
+# A Tag key is always /tags/OL<digits>T (mirrors convert_tag_refs.TAG_KEY_RE).
+TAG_KEY_RE = re.compile(r"^/tags/OL\d+T$")
+
+
 def tag_keys_to_refs(new_keys: list, existing=None) -> list[dict]:
     """Merge new Tag keys with any existing field value and return new-style refs.
 
     Reads both stored shapes ("/tags/OL1T" and {"key": "/tags/OL1T"}), dedupes
     preserving first-seen order, and emits [{"key": "/tags/OL1T"}, ...]. Every
     writer must emit refs, never strings (#13929).
+
+    Any value that is not a well-formed Tag key (e.g. a stray name-string
+    "Fantasy", or a dict whose key is not a /tags path) is skipped with a warning
+    rather than minted into a ref: Infobase rejects such a ref on save, and it is
+    not a resolvable tag (F4).
     """
     seen: set[str] = set()
     refs: list[dict] = []
     for item in list(existing or []) + list(new_keys):
         key = item.get("key") if isinstance(item, dict) else item
-        if key and key not in seen:
+        if not (isinstance(key, str) and TAG_KEY_RE.match(key)):
+            if key:
+                logger.warning("skipping non-tag-key value %r (not a /tags/OL..T key)", key)
+            continue
+        if key not in seen:
             seen.add(key)
             refs.append({"key": key})
     return refs
@@ -261,6 +275,14 @@ def process_dump_for_keys(dump_path: str, keys_set: set, tag_type: str,
     No API fetch calls — only save_many writes.
     """
     work_field = work_field or work_field_for(tag_type)
+    if not dry_run:
+        # F3: the dump path POSTs each work's DUMP-ERA dict (only the tag field is
+        # updated), so any field edited in prod since the dump is reverted on save.
+        # Prefer the live API path (--keys without --dump) for production writes.
+        logger.warning(
+            "DUMP WRITE PATH: saving dump-era work dicts for %r; any field edited in "
+            "prod since the dump will be REVERTED. Use the live API path for prod writes.",
+            tag_type)
     batch = []
     processed = 0
     matched = 0

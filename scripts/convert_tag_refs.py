@@ -437,10 +437,11 @@ def enumerate_work_keys(field: str, limit: int = 1000, max_keys: int | None = No
                         throttle: float = 0.0):
     """Yield work keys that store `field` as a string, via query.json ~=* paging.
 
-    This is a one-shot pre-run snapshot. Offset paging over a live, mutating set
-    can skip or duplicate a row, which is tolerable: convert re-fetches each work
-    and is idempotent, and anything missed is caught by re-enumerating before a
-    follow-up pass. It is NOT itself resumable (re-running restarts from offset 0).
+    This is ONE offset sweep. Offset paging over a live, mutating set with no stable
+    order can both duplicate a row (harmless - convert is idempotent) and SKIP a row
+    (silent data loss - the work is never converted). For a real run use
+    `enumerate_work_keys_converged`, which repeats this sweep until coverage is
+    stable; this single-pass generator is for the capped sampling/test path.
 
     `throttle` sleeps that many seconds after each non-empty page so a full
     (~900K-key) prod sweep stays polite.
@@ -461,6 +462,45 @@ def enumerate_work_keys(field: str, limit: int = 1000, max_keys: int | None = No
         offset += limit
         if throttle:
             time.sleep(throttle)
+
+
+def enumerate_work_keys_converged(field: str, limit: int = 1000, throttle: float = 0.0,
+                                  max_passes: int = 5, _enum=None):
+    """Repeat the offset sweep until coverage is stable, to guard against skips (F1).
+
+    A single `enumerate_work_keys` sweep pages by offset over a live, mutating set
+    with no stable order, so it can silently SKIP a work (not just duplicate one) -
+    and nothing downstream notices the omission. This re-runs the sweep, unioning
+    the keys, until a pass adds NO new key (coverage has stabilised) or `max_passes`
+    is reached. Because each pass's skips are independent, the union converges to
+    full coverage. At least two passes are always required (one sweep can never be
+    proven complete).
+
+    Returns (sorted_unique_keys, converged, per_pass_new). A non-converged result
+    is logged loudly and the caller MUST treat the key set as possibly incomplete.
+    `_enum` injects the single-pass generator (for tests).
+    """
+    if _enum is None:
+        _enum = enumerate_work_keys
+    keys: set[str] = set()
+    per_pass_new: list[int] = []
+    converged = False
+    for p in range(1, max_passes + 1):
+        before = len(keys)
+        for key in _enum(field, limit=limit, throttle=throttle):
+            keys.add(key)
+        new = len(keys) - before
+        per_pass_new.append(new)
+        logger.info("enumerate pass %d/%d: +%d new (total %d)", p, max_passes, new, len(keys))
+        if p >= 2 and new == 0:
+            converged = True
+            break
+    if not converged:
+        logger.warning(
+            "enumerate DID NOT CONVERGE in %d passes (last pass +%d new); the key set "
+            "may be INCOMPLETE - rerun with a larger --max-passes before a real run",
+            max_passes, per_pass_new[-1])
+    return sorted(keys), converged, per_pass_new
 
 
 def fetch_work(key: str) -> dict:
@@ -552,16 +592,33 @@ def order_undo_rows(rows):
 # CLI
 # ---------------------------------------------------------------------------
 def cmd_enumerate(args):
+    if args.max_keys:
+        # Sampling/test mode: a single capped, streamed pass (no completeness guard).
+        out = open(args.out, "w") if args.out else sys.stdout
+        n = 0
+        for key in enumerate_work_keys(args.field, max_keys=args.max_keys, throttle=args.throttle):
+            out.write(key + "\n")
+            n += 1
+            if n % 10000 == 0:
+                logger.info("enumerated %d", n)
+        if args.out:
+            out.close()
+        logger.info("enumerated %d work keys (capped at --max-keys) for field %s", n, args.field)
+        return
+
+    keys, converged, per_pass_new = enumerate_work_keys_converged(
+        args.field, throttle=args.throttle, max_passes=args.max_passes)
     out = open(args.out, "w") if args.out else sys.stdout
-    n = 0
-    for key in enumerate_work_keys(args.field, max_keys=args.max_keys, throttle=args.throttle):
+    for key in keys:
         out.write(key + "\n")
-        n += 1
-        if n % 10000 == 0:
-            logger.info("enumerated %d", n)
     if args.out:
         out.close()
-    logger.info("enumerated %d work keys for field %s", n, args.field)
+    logger.info("enumerated %d unique work keys for field %s (per-pass new=%s, converged=%s)",
+                len(keys), args.field, per_pass_new, converged)
+    if not converged:
+        # Exit non-zero so an operator's run script does not treat an incomplete
+        # snapshot as a complete one.
+        sys.exit(2)
 
 
 def cmd_convert(args):
@@ -664,7 +721,11 @@ def build_parser():
     e = sub.add_parser("enumerate", help="snapshot affected work keys via query.json")
     e.add_argument("--field", default="genres")
     e.add_argument("--out", help="output file (default stdout)")
-    e.add_argument("--max-keys", type=int, default=None)
+    e.add_argument("--max-keys", type=int, default=None,
+                   help="cap the sweep (sampling/test mode; disables the completeness guard)")
+    e.add_argument("--max-passes", type=int, default=5,
+                   help="re-sweep until a pass adds no new key, up to this many passes "
+                        "(completeness guard against offset-paging skips, F1)")
     e.add_argument("--throttle", type=float, default=0.0,
                    help="seconds to sleep between query.json pages (polite full sweep)")
     e.set_defaults(func=cmd_enumerate)

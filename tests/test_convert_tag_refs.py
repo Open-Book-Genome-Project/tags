@@ -497,3 +497,56 @@ class TestEnumerateThrottle:
         monkeypatch.setattr(ctr.time, "sleep", slept.append)
         list(ctr.enumerate_work_keys("genres", limit=1, throttle=0))
         assert slept == []
+
+
+class TestEnumerateConverged:
+    """A single offset sweep over a live, mutating set can SKIP works (F1). The
+    converged wrapper repeats the sweep and unions the keys until a pass adds no
+    new key, turning a silent skip into recovered coverage or a loud warning."""
+
+    @staticmethod
+    def _enum_from(passes):
+        """Return a stand-in for enumerate_work_keys that yields a different
+        (skip-prone) page set on each successive call, from `passes`."""
+        it = iter(passes)
+
+        def _enum(field, limit=1000, throttle=0.0, max_keys=None):
+            for key in next(it):
+                yield key
+        return _enum
+
+    def test_recovers_a_key_skipped_on_an_earlier_pass(self):
+        # pass 1 skips C, pass 2 skips B, pass 3 sees all -> converges having found all three
+        enum = self._enum_from([
+            ["/works/OLaW", "/works/OLbW"],            # skips c
+            ["/works/OLbW", "/works/OLcW"],            # skips a (already seen), adds c
+            ["/works/OLaW", "/works/OLbW", "/works/OLcW"],  # +0 new -> converged
+        ])
+        keys, converged, per_pass_new = ctr.enumerate_work_keys_converged(
+            "genres", max_passes=5, _enum=enum)
+        assert keys == ["/works/OLaW", "/works/OLbW", "/works/OLcW"]  # sorted, deduped, complete
+        assert converged is True
+        assert per_pass_new == [2, 1, 0]
+
+    def test_tiny_set_converges_in_two_passes(self):
+        enum = self._enum_from([["/works/OL3W"], ["/works/OL3W"]])
+        keys, converged, per_pass_new = ctr.enumerate_work_keys_converged(
+            "subgenres", max_passes=5, _enum=enum)
+        assert keys == ["/works/OL3W"]
+        assert converged is True
+        assert per_pass_new == [1, 0]
+
+    def test_reports_non_convergence_when_never_stable(self, caplog):
+        # each pass invents a brand-new key, so the sweep never stabilizes
+        counter = {"n": 0}
+
+        def enum(field, limit=1000, throttle=0.0, max_keys=None):
+            counter["n"] += 1
+            yield f"/works/OL{counter['n']}W"
+
+        keys, converged, per_pass_new = ctr.enumerate_work_keys_converged(
+            "genres", max_passes=3, _enum=enum)
+        assert converged is False
+        assert len(keys) == 3            # one new per pass, capped at max_passes
+        assert per_pass_new == [1, 1, 1]
+        assert any("did not converge" in r.message.lower() for r in caplog.records)

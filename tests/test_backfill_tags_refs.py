@@ -41,6 +41,15 @@ class TestTagKeysToRefs:
         out = tag_keys_to_refs(["/tags/OL1T"], existing=[{"key": "/tags/OL1T"}])
         assert out == [{"key": "/tags/OL1T"}]
 
+    def test_rejects_non_tag_key_string(self):
+        # a stray name-string must NOT be minted into a ref (F4): Infobase would
+        # later reject {"key": "Fantasy"} and it is not a resolvable tag path.
+        assert tag_keys_to_refs(["Fantasy", "/tags/OL1T"]) == [{"key": "/tags/OL1T"}]
+
+    def test_rejects_non_tag_key_in_existing_dict(self):
+        out = tag_keys_to_refs(["/tags/OL1T"], existing=[{"key": "Fantasy"}])
+        assert out == [{"key": "/tags/OL1T"}]
+
     def test_skips_malformed_existing_dict_without_key(self):
         # a stray {"name": ...} in an existing field must not raise KeyError
         out = tag_keys_to_refs(["/tags/OL1T"], existing=[{"name": "Fantasy"}])
