@@ -441,3 +441,59 @@ class TestKnownFieldsArePlural:
         assert "literary_form" not in ctr.KNOWN_TAG_FIELDS   # that's the Tag's tag_type, not the work field
         for f in ("genres", "subgenres", "audiences", "content_formats", "content_warnings"):
             assert f in ctr.KNOWN_TAG_FIELDS
+
+
+class TestWaitWhilePaused:
+    """--pause-file control: block between batches while a PAUSE file exists (#13929)."""
+
+    def test_no_pause_file_configured_returns_false(self):
+        slept = []
+        assert ctr._wait_while_paused(None, poll=5, _sleep=slept.append) is False
+        assert slept == []
+
+    def test_absent_pause_file_returns_false(self, tmp_path):
+        slept = []
+        missing = str(tmp_path / "PAUSE")
+        assert ctr._wait_while_paused(missing, poll=5, _sleep=slept.append) is False
+        assert slept == []
+
+    def test_waits_until_file_removed(self):
+        # present, present, gone: enters, polls while present, then resumes
+        states = iter([True, True, False])
+        slept = []
+        paused = ctr._wait_while_paused(
+            "PAUSE", poll=0.01, _sleep=slept.append, _exists=lambda p: next(states))
+        assert paused is True
+        assert len(slept) == 1
+
+
+class TestEnumerateThrottle:
+    """enumerate paging is throttled between pages for a polite full-prod sweep."""
+
+    class _Resp:
+        def __init__(self, rows):
+            self._rows = rows
+
+        def json(self):
+            return self._rows
+
+    def test_sleeps_after_each_nonempty_page(self, monkeypatch):
+        pages = iter([
+            [{"key": "/works/OL1W"}, {"key": "/works/OL2W"}],
+            [{"key": "/works/OL3W"}],
+            [],
+        ])
+        monkeypatch.setattr(ctr.requests, "get", lambda url, **kw: self._Resp(next(pages)))
+        slept = []
+        monkeypatch.setattr(ctr.time, "sleep", slept.append)
+        keys = list(ctr.enumerate_work_keys("genres", limit=2, throttle=1.5))
+        assert keys == ["/works/OL1W", "/works/OL2W", "/works/OL3W"]
+        assert slept == [1.5, 1.5]   # one sleep per non-empty page, none after the empty page
+
+    def test_no_throttle_does_not_sleep(self, monkeypatch):
+        pages = iter([[{"key": "/works/OL1W"}], []])
+        monkeypatch.setattr(ctr.requests, "get", lambda url, **kw: self._Resp(next(pages)))
+        slept = []
+        monkeypatch.setattr(ctr.time, "sleep", slept.append)
+        list(ctr.enumerate_work_keys("genres", limit=1, throttle=0))
+        assert slept == []

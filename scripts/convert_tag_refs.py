@@ -323,6 +323,26 @@ def save_with_bisect(save_fn, docs) -> tuple[list[dict], list[str]]:
 # ---------------------------------------------------------------------------
 # Run orchestration (used by `convert`; takes injected works/saver for tests)
 # ---------------------------------------------------------------------------
+def _wait_while_paused(pause_file, poll: float = 10.0, _sleep=time.sleep, _exists=None) -> bool:
+    """Block while `pause_file` exists; return True iff we actually paused.
+
+    Lets an operator halt a live run cleanly between batches (e.g. during the
+    #14229 deploy->retype window, when a converted work would be indexed with no
+    genre_key and never reindexed) by touching the file, and resume by removing it.
+    The --done checkpoint already makes a stop/restart safe; this keeps the SAME
+    process paused so no re-invocation is needed.
+    """
+    if _exists is None:
+        _exists = lambda p: Path(p).exists()
+    if not pause_file or not _exists(pause_file):
+        return False
+    logger.warning("PAUSED: %r present; polling every %ss until it is removed", pause_file, poll)
+    while _exists(pause_file):
+        _sleep(poll)
+    logger.info("resumed: %r removed", pause_file)
+    return True
+
+
 def run_conversion(
     works,
     fields,
@@ -334,6 +354,8 @@ def run_conversion(
     comment: str,
     audit_fp=None,
     done_fp=None,
+    pause_file=None,
+    pause_poll: float = 10.0,
 ) -> dict:
     """Drive the conversion over an iterable of work dicts.
 
@@ -357,6 +379,9 @@ def run_conversion(
         pending_audit.clear()
         if not write:
             return
+        # Honor an operator pause BEFORE touching the audit log or saving, so a
+        # paused run leaves no half-written batch (the deploy->retype window).
+        _wait_while_paused(pause_file, pause_poll)
         # Audit-before-save (adversarial review M3): write the intended changes
         # FIRST, so a crash mid-flush still leaves a reversible record. Undo is
         # idempotent, so an audit row for a save that then fails is harmless
@@ -408,13 +433,17 @@ def run_conversion(
 # ---------------------------------------------------------------------------
 # Live helpers (network) used by the CLI
 # ---------------------------------------------------------------------------
-def enumerate_work_keys(field: str, limit: int = 1000, max_keys: int | None = None):
+def enumerate_work_keys(field: str, limit: int = 1000, max_keys: int | None = None,
+                        throttle: float = 0.0):
     """Yield work keys that store `field` as a string, via query.json ~=* paging.
 
     This is a one-shot pre-run snapshot. Offset paging over a live, mutating set
     can skip or duplicate a row, which is tolerable: convert re-fetches each work
     and is idempotent, and anything missed is caught by re-enumerating before a
     follow-up pass. It is NOT itself resumable (re-running restarts from offset 0).
+
+    `throttle` sleeps that many seconds after each non-empty page so a full
+    (~900K-key) prod sweep stays polite.
     """
     offset = 0
     seen = 0
@@ -430,6 +459,8 @@ def enumerate_work_keys(field: str, limit: int = 1000, max_keys: int | None = No
             if max_keys and seen >= max_keys:
                 return
         offset += limit
+        if throttle:
+            time.sleep(throttle)
 
 
 def fetch_work(key: str) -> dict:
@@ -523,7 +554,7 @@ def order_undo_rows(rows):
 def cmd_enumerate(args):
     out = open(args.out, "w") if args.out else sys.stdout
     n = 0
-    for key in enumerate_work_keys(args.field, max_keys=args.max_keys):
+    for key in enumerate_work_keys(args.field, max_keys=args.max_keys, throttle=args.throttle):
         out.write(key + "\n")
         n += 1
         if n % 10000 == 0:
@@ -573,6 +604,7 @@ def cmd_convert(args):
             works=works_iter(), fields=fields, resolver=resolver, saver=saver,
             write=args.write, batch_size=args.batch_size, run_id=run_id,
             comment=comment, audit_fp=audit_fp, done_fp=done_fp,
+            pause_file=args.pause_file, pause_poll=args.pause_poll,
         )
     finally:
         if audit_fp:
@@ -633,6 +665,8 @@ def build_parser():
     e.add_argument("--field", default="genres")
     e.add_argument("--out", help="output file (default stdout)")
     e.add_argument("--max-keys", type=int, default=None)
+    e.add_argument("--throttle", type=float, default=0.0,
+                   help="seconds to sleep between query.json pages (polite full sweep)")
     e.set_defaults(func=cmd_enumerate)
 
     c = sub.add_parser("convert", help="convert fields on works from a key snapshot")
@@ -645,6 +679,9 @@ def build_parser():
     c.add_argument("--done", help="resumable checkpoint of saved work keys")
     c.add_argument("--run-id", help="override run id")
     c.add_argument("--comment", help=f"save comment (default: {DEFAULT_COMMENT!r})")
+    c.add_argument("--pause-file", help="pause between batches while this path exists; resume when removed")
+    c.add_argument("--pause-poll", type=float, default=10.0,
+                   help="seconds between checks of --pause-file (default: 10)")
     c.set_defaults(func=cmd_convert)
 
     u = sub.add_parser("undo", help="restore previous values from an audit log")
