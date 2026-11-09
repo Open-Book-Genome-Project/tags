@@ -196,6 +196,41 @@ def cmd_unmapped(args: argparse.Namespace) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Subjects - search and preview a subject -> Tag migration (READ-ONLY skeleton)
+# ---------------------------------------------------------------------------
+
+def cmd_subjects_search(args: argparse.Namespace) -> None:
+    """Search Open Library subjects by name (read-only)."""
+    from tags.subjects import format_search, search_subjects
+    from tags.utils import get_ol_session
+
+    ol = get_ol_session()
+    docs = search_subjects(ol, args.query, limit=args.limit, subject_type=args.type)
+    print(format_search(docs))
+
+
+def cmd_subjects_preview(args: argparse.Namespace) -> None:
+    """Preview what migrating a subject onto a Tag would touch (read-only)."""
+    from tags.subjects import format_preview, preview_migration
+    from tags.utils import get_ol_session, slug_to_tag_key
+
+    ol = get_ol_session()
+    target_tag = args.to
+    if target_tag and not target_tag.startswith("/tags/"):
+        # Treat --to as a vocabulary slug for the field matching the subject type.
+        target_tag = slug_to_tag_key(args.type, target_tag) or args.to
+    preview = preview_migration(
+        ol,
+        args.subject,
+        subject_type=args.type,
+        target_tag=target_tag,
+        limit=args.limit,
+        samples=args.samples,
+    )
+    print(format_preview(preview, args.limit))
+
+
+# ---------------------------------------------------------------------------
 # CLI entry point
 # ---------------------------------------------------------------------------
 
@@ -220,12 +255,33 @@ def main():
     up.add_argument("--top", type=int, default=40, help="Number of top unmapped to show")
     up.add_argument("--progress", type=int, default=None, help="Progress every N works")
 
+    # subjects (read-only: search + preview a subject -> Tag migration)
+    sp = subparsers.add_parser("subjects", help="Search subjects and preview a Tag migration")
+    sp_sub = sp.add_subparsers(dest="subjects_command", required=True)
+
+    sp_search = sp_sub.add_parser("search", help="Search Open Library subjects by name")
+    sp_search.add_argument("query", help="Subject query, e.g. 'biography'")
+    sp_search.add_argument("--type", default=None, help="Restrict to subject/person/place/time")
+    sp_search.add_argument("--limit", type=int, default=10, help="Max results")
+
+    sp_preview = sp_sub.add_parser("preview", help="Preview a subject -> Tag migration (read-only)")
+    sp_preview.add_argument("subject", help="Exact subject string to migrate")
+    sp_preview.add_argument("--type", default="subject", help="subject/person/place/time")
+    sp_preview.add_argument("--to", default=None, help="Target Tag OLID (/tags/OL..T) or vocabulary slug")
+    sp_preview.add_argument("--limit", type=int, default=50, help="Max works to enumerate")
+    sp_preview.add_argument("--samples", type=int, default=5, help="Sample titles to show")
+
     args = parser.parse_args()
 
     if args.command == "analyze":
         cmd_analyze(args)
     elif args.command == "unmapped":
         cmd_unmapped(args)
+    elif args.command == "subjects":
+        if args.subjects_command == "search":
+            cmd_subjects_search(args)
+        elif args.subjects_command == "preview":
+            cmd_subjects_preview(args)
 
 
 if __name__ == "__main__":
