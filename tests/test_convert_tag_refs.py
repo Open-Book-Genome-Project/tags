@@ -786,3 +786,69 @@ class TestFindStragglerKeys:
 
     def test_malformed_line_is_skipped(self):
         assert list(ctr.find_straggler_keys(["garbage\tno\tjson\n"], ["genres"], set())) == []
+
+
+class _FakeCookies:
+    def __init__(self, jar):
+        self._jar = jar
+
+    def get(self, name):
+        return self._jar.get(name)
+
+
+class _FakeSession:
+    def __init__(self, cookie_value):
+        self.cookies = _FakeCookies({"session": cookie_value} if cookie_value else {})
+
+
+class _FakeOL:
+    def __init__(self, cookie_value):
+        self.session = _FakeSession(cookie_value)
+        self.base_url = "https://openlibrary.org"
+
+
+class TestLoadBotCredentials:
+    """--creds parsing: colon-delimited account/email/s3_access/s3_secret."""
+
+    def test_parses_colon_delimited(self, tmp_path):
+        f = tmp_path / "bot"
+        f.write_text("account: openlibrarytagbot\nemail: a@b.c\n"
+                     "s3_access: AK\ns3_secret: SK\n")
+        creds = ctr.load_bot_credentials(str(f))
+        assert creds["account"] == "openlibrarytagbot"
+        assert creds["s3_access"] == "AK"
+        assert creds["s3_secret"] == "SK"
+
+    def test_missing_field_aborts(self, tmp_path):
+        f = tmp_path / "bot"
+        f.write_text("account: x\ns3_access: AK\n")   # no s3_secret
+        with pytest.raises(SystemExit):
+            ctr.load_bot_credentials(str(f))
+
+
+class TestLoginIdentityAssertion:
+    """A run must only ever write as the credentialed bot account."""
+
+    def test_logged_in_user_reads_people_key_from_cookie(self):
+        ol = _FakeOL("/people/openlibrarytagbot,2026-11-19,deadbeef")
+        assert ctr.logged_in_user(ol) == "/people/openlibrarytagbot"
+
+    def test_logged_in_user_url_decodes_cookie(self):
+        ol = _FakeOL("%2Fpeople%2Fopenlibrarytagbot%2C2026%2Cabc")
+        assert ctr.logged_in_user(ol) == "/people/openlibrarytagbot"
+
+    def test_logged_in_user_none_without_cookie(self):
+        assert ctr.logged_in_user(_FakeOL(None)) is None
+
+    def test_assert_matches_bare_account(self):
+        ol = _FakeOL("/people/openlibrarytagbot,2026,abc")
+        ctr.assert_logged_in_as(ol, "openlibrarytagbot")   # no raise
+
+    def test_assert_rejects_wrong_account(self):
+        ol = _FakeOL("/people/mekarpeles,2026,abc")
+        with pytest.raises(SystemExit):
+            ctr.assert_logged_in_as(ol, "openlibrarytagbot")
+
+    def test_assert_rejects_unauthenticated(self):
+        with pytest.raises(SystemExit):
+            ctr.assert_logged_in_as(_FakeOL(None), "openlibrarytagbot")

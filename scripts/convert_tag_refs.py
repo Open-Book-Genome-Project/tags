@@ -83,6 +83,75 @@ KNOWN_TAG_FIELDS = [
 
 
 # ---------------------------------------------------------------------------
+# Authenticated write session (bot credentials + identity assertion)
+# ---------------------------------------------------------------------------
+def load_bot_credentials(path: str) -> dict:
+    """Parse a bot credential file (colon-delimited lines: account/email/
+    s3_access/s3_secret). Returns the parsed dict. Values are NEVER logged."""
+    creds = {}
+    for line in Path(path).read_text().splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or ":" not in line:
+            continue
+        k, v = line.split(":", 1)
+        creds[k.strip()] = v.strip()
+    missing = [k for k in ("account", "s3_access", "s3_secret") if not creds.get(k)]
+    if missing:
+        raise SystemExit(f"creds file {path}: missing field(s): {missing}")
+    return creds
+
+
+def logged_in_user(ol) -> str | None:
+    """Return the /people/<name> the session is authenticated as, or None.
+
+    OL's `session` cookie value begins with the logged-in user key, e.g.
+    "/people/foo,2026-...,<hash>" (URL-encoded). Read it from there."""
+    from urllib.parse import unquote
+    try:
+        raw = ol.session.cookies.get("session")
+    except Exception:  # noqa: BLE001
+        raw = None
+    if raw:
+        head = unquote(raw).split(",", 1)[0].strip().strip('"')
+        if head.startswith("/people/"):
+            return head
+    return None
+
+
+def assert_logged_in_as(ol, expected_account: str) -> None:
+    """Abort before any write unless the session is the intended bot. This is the
+    guard that a run can only ever write as the credentialed account, never as
+    whatever happens to be in ~/.config/ol.ini."""
+    expected = expected_account if expected_account.startswith("/people/") \
+        else f"/people/{expected_account}"
+    who = logged_in_user(ol)
+    if who != expected:
+        raise SystemExit(
+            f"login identity check FAILED: session is {who!r}, expected "
+            f"{expected!r} - refusing to write")
+    logger.info("login identity OK: writing as %s", who)
+
+
+def get_write_session(creds_path: str | None):
+    """Build the authenticated OpenLibrary session for a real run.
+
+    With --creds, log in using that bot's S3 keys and assert the session really
+    is that account. Without --creds, fall back to the legacy ~/.config/ol.ini
+    session (get_ol_session) - which asserts nothing, so --creds is preferred for
+    production. Credential values are read in process and never logged."""
+    if not creds_path:
+        logger.warning("no --creds given: using ~/.config/ol.ini (identity NOT asserted)")
+        return get_ol_session()
+    from olclient.openlibrary import OpenLibrary
+    from olclient.config import Credentials
+    creds = load_bot_credentials(creds_path)
+    ol = OpenLibrary(credentials=Credentials(access=creds["s3_access"],
+                                             secret=creds["s3_secret"]))
+    assert_logged_in_as(ol, creds["account"])
+    return ol
+
+
+# ---------------------------------------------------------------------------
 # Classifying a single stored field item
 # ---------------------------------------------------------------------------
 def classify_item(item) -> tuple[str, str | None]:
@@ -878,7 +947,7 @@ def cmd_convert(args):
             except Exception as e:  # noqa: BLE001
                 logger.error("fetch failed %s: %s", k, e)
 
-    ol = get_ol_session() if args.write else None
+    ol = get_write_session(args.creds) if args.write else None
     # Ruling 1: record the revision save_many reports for each saved doc, so verify
     # can use the exact signal (saved_rev vs base_rev) instead of the live-revision gap.
     saved_revs = {} if args.write else None
@@ -924,7 +993,7 @@ def cmd_undo(args):
     run_id = f"undo-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}"
     rows = order_undo_rows([json.loads(l) for l in open(args.audit) if l.strip()])
     logger.info("undo: %d audit rows, newest-first (write=%s)", len(rows), args.write)
-    ol = get_ol_session() if args.write else None
+    ol = get_write_session(args.creds) if args.write else None
     saver = make_saver(ol, args.throttle) if args.write else (lambda b, c: True)
     counts = {"restored": 0, "noop": 0, "conflict": 0, "error": 0}
     for row in rows:
@@ -1043,6 +1112,9 @@ def build_parser():
     c.add_argument("--keys", required=True, help="file of work keys (from enumerate)")
     c.add_argument("--fields", default="genres,subgenres")
     c.add_argument("--write", action="store_true", help="ACTUALLY write (default: dry-run)")
+    c.add_argument("--creds", help="bot credential file (account/s3_access/s3_secret); "
+                   "login identity is asserted against its 'account' before any write. "
+                   "Omit to fall back to ~/.config/ol.ini (identity NOT asserted).")
     c.add_argument("--batch-size", type=int, default=100)
     c.add_argument("--throttle", type=float, default=1.0, help="seconds between save_many calls")
     c.add_argument("--audit", help="append audit JSONL here (feeds --undo)")
@@ -1059,6 +1131,8 @@ def build_parser():
                                     "run undo before any hand declaration - see #14229)")
     u.add_argument("--audit", required=True)
     u.add_argument("--write", action="store_true")
+    u.add_argument("--creds", help="bot credential file (see `convert --creds`); "
+                   "identity asserted before any write")
     u.add_argument("--throttle", type=float, default=1.0)
     u.set_defaults(func=cmd_undo)
 
