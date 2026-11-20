@@ -16,6 +16,7 @@ Phase 2 - Fetch, migrate, save (dry-run default until schema is ready):
 import argparse
 import gzip
 import json
+import re
 import sys
 import time
 import logging
@@ -30,11 +31,72 @@ logger = logging.getLogger(__name__)
 
 # sys.path.insert lets us import from scripts/ even when running from repo root
 sys.path.insert(0, str(Path(__file__).parent.parent))
-from scripts.migrate_work import WorkMigrator
+from scripts.migrate_work import WorkMigrator, MIGRATABLE_TYPES
 from tags.utils import get_ol_session
 
 FETCH_TIMEOUT = 30   # seconds for fetching a single work JSON
 SAVE_TIMEOUT = 60    # seconds for the save_many POST (matches OL batch-script convention)
+
+
+# tag_type (the tag_types/<dir> name the classifier emits) -> the work field the
+# OL Solr indexer actually reads. Most dir names line up with the work field, but a
+# few are singular while the decided work field is plural; writing the dir name would
+# strand those tags where nothing reads them (#13755 decision 1). The map is derived
+# from MIGRATABLE_TYPES so every type the classifier can emit is covered (refusing a
+# migratable type would drop a capability the backfill pipeline has today); only the
+# singular dir names are overridden to their plural work field.
+_WORK_FIELD_OVERRIDES = {
+    "literary_form": "literary_forms",
+    "audience": "audiences",
+}
+TAG_TYPE_TO_WORK_FIELD = {
+    t: _WORK_FIELD_OVERRIDES.get(t, t) for t in MIGRATABLE_TYPES
+}
+
+
+def work_field_for(tag_type: str) -> str:
+    """Map a tag_type to its work field, refusing any type we have no decided field for.
+
+    Refusing (rather than defaulting to tag_type) keeps us from inventing a field
+    name no reader knows about — the exact failure mode this guards against.
+    """
+    try:
+        return TAG_TYPE_TO_WORK_FIELD[tag_type]
+    except KeyError:
+        raise ValueError(
+            f"No work field mapped for tag_type {tag_type!r}; "
+            f"known: {', '.join(sorted(TAG_TYPE_TO_WORK_FIELD))}"
+        )
+
+
+# A Tag key is always /tags/OL<digits>T (mirrors convert_tag_refs.TAG_KEY_RE).
+TAG_KEY_RE = re.compile(r"^/tags/OL\d+T$")
+
+
+def tag_keys_to_refs(new_keys: list, existing=None) -> list[dict]:
+    """Merge new Tag keys with any existing field value and return new-style refs.
+
+    Reads both stored shapes ("/tags/OL1T" and {"key": "/tags/OL1T"}), dedupes
+    preserving first-seen order, and emits [{"key": "/tags/OL1T"}, ...]. Every
+    writer must emit refs, never strings (#13929).
+
+    Any value that is not a well-formed Tag key (e.g. a stray name-string
+    "Fantasy", or a dict whose key is not a /tags path) is skipped with a warning
+    rather than minted into a ref: Infobase rejects such a ref on save, and it is
+    not a resolvable tag (F4).
+    """
+    seen: set[str] = set()
+    refs: list[dict] = []
+    for item in list(existing or []) + list(new_keys):
+        key = item.get("key") if isinstance(item, dict) else item
+        if not (isinstance(key, str) and TAG_KEY_RE.match(key)):
+            if key:
+                logger.warning("skipping non-tag-key value %r (not a /tags/OL..T key)", key)
+            continue
+        if key not in seen:
+            seen.add(key)
+            refs.append({"key": key})
+    return refs
 
 #---------------------------------------------------------------------------
 # Phase 2 helpers - fetch (batch), record keys, flush a batch, POST raw dicts
@@ -207,11 +269,20 @@ def scan_dump_for_matched_keys(dump_path: str, tag_type: str):
 def process_dump_for_keys(dump_path: str, keys_set: set, tag_type: str,
                           ol, migrator, batch_size: int, delay: float,
                           dry_run: bool, flushed_log: str, failed_log: str,
-                          flushed_set: set):
+                          flushed_set: set, work_field: str = None):
     """
     Stream through the dump, process only works whose keys are in keys_set.
     No API fetch calls — only save_many writes.
     """
+    work_field = work_field or work_field_for(tag_type)
+    if not dry_run:
+        # F3: the dump path POSTs each work's DUMP-ERA dict (only the tag field is
+        # updated), so any field edited in prod since the dump is reverted on save.
+        # Prefer the live API path (--keys without --dump) for production writes.
+        logger.warning(
+            "DUMP WRITE PATH: saving dump-era work dicts for %r; any field edited in "
+            "prod since the dump will be REVERTED. Use the live API path for prod writes.",
+            tag_type)
     batch = []
     processed = 0
     matched = 0
@@ -253,7 +324,7 @@ def process_dump_for_keys(dump_path: str, keys_set: set, tag_type: str,
                 continue
 
             work["key"] = key
-            work[tag_type] = tag_keys
+            work[work_field] = tag_keys_to_refs(tag_keys, work.get(work_field))
             batch.append(work)
 
             if len(batch) >= batch_size:
@@ -288,6 +359,7 @@ def backfill_tag_keys(keys_path: str, tag_type: str, dry_run: bool, batch_size: 
     With --resume, works already recorded in the flushed log are skipped,
     so an interrupted run can simply be started with the same command.
     """
+    work_field = work_field_for(tag_type)   # refuse unknown tag_types before any work
     ol = get_ol_session()
     migrator = WorkMigrator()
 
@@ -311,7 +383,7 @@ def backfill_tag_keys(keys_path: str, tag_type: str, dry_run: bool, batch_size: 
         try:
             processed, matched, migrate_time, save_time, delay_time = process_dump_for_keys(
                 dump_path, keys_set, tag_type, ol, migrator, batch_size, delay,
-                dry_run, flushed_log, failed_log, already_flushed
+                dry_run, flushed_log, failed_log, already_flushed, work_field
             )
         except KeyboardInterrupt:
             logger.warning("Interrupted by the user.")
@@ -385,7 +457,7 @@ def backfill_tag_keys(keys_path: str, tag_type: str, dry_run: bool, batch_size: 
                     logger.info(f"{key}: {tag_type} = {tag_keys}")
                     continue
 
-                work[tag_type] = tag_keys
+                work[work_field] = tag_keys_to_refs(tag_keys, work.get(work_field))
                 batch.append(work)
 
             if len(batch) >= batch_size:
@@ -468,6 +540,12 @@ def main():
     parser.add_argument("--keys", help="Path to work keys file (one per line) — Phase 2 processing")
 
     args = parser.parse_args()
+
+    # Refuse an unmapped tag_type up front, before touching the dump or the API.
+    try:
+        work_field_for(args.type)
+    except ValueError as e:
+        parser.error(str(e))
 
     # Phase 1: scan dump for matched keys (standalone --dump, no --keys)
     if args.dump and not args.keys:

@@ -1,0 +1,1163 @@
+#!/usr/bin/env python
+"""
+convert_tag_refs.py - Convert stored Tag fields on works from key-strings to refs (#13929).
+
+Every Tag field on a work must be stored new-style: a plural field holding a list
+of refs, `[{"key": "/tags/OL123T"}]`, never a list of strings `["/tags/OL123T"]`
+(decision @mekarpeles 2026-10-14). Today `genres` (>900K works) and `subgenres`
+(<~50K) are stored as key-strings; this tool rewrites them in place.
+
+Safety model (read the hard limits in #13929 first):
+  * Dry-run is the default. Nothing is ever written without the explicit --write flag.
+  * Each work is re-fetched live immediately before writing (never a stale dump).
+  * Only the targeted Tag field is touched; every other field is preserved exactly
+    as fetched (we mutate the fetched dict, we do NOT round-trip through a lossy
+    serializer).
+  * Redirected Tags are followed to their target; deleted/missing Tags are dropped;
+    both are recorded in the audit log so --undo can restore the original value.
+  * A value we cannot classify (a name string, a non-Tag path) causes the WHOLE
+    work to be skipped and reported - nothing is written half-converted.
+  * save_many is atomic, so a failed batch is bisected down to the offending work,
+    which is logged and skipped; everything else in the batch still saves.
+  * Every audit row carries the run id, save comment and the work revision we based
+    the write on, so a run is reversible and overwrites are detectable after the fact.
+
+Staleness window: a work is re-fetched live, then held until its batch of
+--batch-size flushes, and /api/save_many does NOT check revisions - so an edit made
+to a work in that window would be overwritten. The window is kept small (one batch,
+throttled), undo is conditional (it refuses to clobber a value edited since the run),
+and each audit row records the base revision for forensics. Lower --batch-size to
+shrink the window further.
+
+Typical use:
+    # 1. Snapshot the full set of affected work keys to a file (the frozen work
+    #    list the run processes; resumption across restarts is handled by convert
+    #    via its --done checkpoint, below).
+    python scripts/convert_tag_refs.py enumerate --field genres --out run.keys
+
+    # 2. Dry-run the conversion over the snapshot (no writes)
+    python scripts/convert_tag_refs.py convert --keys run.keys --fields genres,subgenres
+
+    # 3. The real run (requires --write; needs the prod type declared first, see #13929)
+    python scripts/convert_tag_refs.py convert --keys run.keys --fields genres,subgenres \
+        --write --audit run.audit.jsonl --done run.done
+
+    # Reverse a run from its audit log
+    python scripts/convert_tag_refs.py undo --audit run.audit.jsonl --write
+"""
+
+from __future__ import annotations
+
+import argparse
+import gzip
+import json
+import logging
+import re
+import sys
+import time
+from dataclasses import dataclass, field as dc_field
+from datetime import datetime, timezone
+from pathlib import Path
+
+import requests
+
+sys.path.insert(0, str(Path(__file__).parent.parent))
+from tags.utils import get_ol_session  # noqa: E402
+from scripts.backfill_tags import save_many_dicts  # noqa: E402  (battle-tested raw POST)
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+logger = logging.getLogger(__name__)
+
+OL = "https://openlibrary.org"
+USER_AGENT = "ol-tags convert_tag_refs (#13929; mek@archive.org)"
+TAG_KEY_RE = re.compile(r"^/tags/OL\d+T$")
+DEFAULT_COMMENT = "Convert Tag fields to refs (#13929)"
+
+# Work Tag fields are PLURAL (the decided work-field names); the singular form
+# (e.g. literary_form) is only a Tag's tag_type, never a work field. This is the
+# allow-list guarding --fields.
+KNOWN_TAG_FIELDS = [
+    "genres", "subgenres", "audiences", "content_formats",
+    "content_warnings", "literary_forms", "moods",
+]
+
+
+# ---------------------------------------------------------------------------
+# Authenticated write session (bot credentials + identity assertion)
+# ---------------------------------------------------------------------------
+def load_bot_credentials(path: str) -> dict:
+    """Parse a bot credential file (colon-delimited lines: account/email/
+    s3_access/s3_secret). Returns the parsed dict. Values are NEVER logged."""
+    creds = {}
+    for line in Path(path).read_text().splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or ":" not in line:
+            continue
+        k, v = line.split(":", 1)
+        creds[k.strip()] = v.strip()
+    missing = [k for k in ("account", "s3_access", "s3_secret") if not creds.get(k)]
+    if missing:
+        raise SystemExit(f"creds file {path}: missing field(s): {missing}")
+    return creds
+
+
+def logged_in_user(ol) -> str | None:
+    """Return the /people/<name> the session is authenticated as, or None.
+
+    OL's `session` cookie value begins with the logged-in user key, e.g.
+    "/people/foo,2026-...,<hash>" (URL-encoded). Read it from there."""
+    from urllib.parse import unquote
+    try:
+        raw = ol.session.cookies.get("session")
+    except Exception:  # noqa: BLE001
+        raw = None
+    if raw:
+        head = unquote(raw).split(",", 1)[0].strip().strip('"')
+        if head.startswith("/people/"):
+            return head
+    return None
+
+
+def assert_logged_in_as(ol, expected_account: str) -> None:
+    """Abort before any write unless the session is the intended bot. This is the
+    guard that a run can only ever write as the credentialed account, never as
+    whatever happens to be in ~/.config/ol.ini."""
+    expected = expected_account if expected_account.startswith("/people/") \
+        else f"/people/{expected_account}"
+    who = logged_in_user(ol)
+    if who != expected:
+        raise SystemExit(
+            f"login identity check FAILED: session is {who!r}, expected "
+            f"{expected!r} - refusing to write")
+    logger.info("login identity OK: writing as %s", who)
+
+
+def get_write_session(creds_path: str | None):
+    """Build the authenticated OpenLibrary session for a real run.
+
+    With --creds, log in using that bot's S3 keys and assert the session really
+    is that account. Without --creds, fall back to the legacy ~/.config/ol.ini
+    session (get_ol_session) - which asserts nothing, so --creds is preferred for
+    production. Credential values are read in process and never logged."""
+    if not creds_path:
+        logger.warning("no --creds given: using ~/.config/ol.ini (identity NOT asserted)")
+        return get_ol_session()
+    from olclient.openlibrary import OpenLibrary
+    from olclient.config import Credentials
+    creds = load_bot_credentials(creds_path)
+    ol = OpenLibrary(credentials=Credentials(access=creds["s3_access"],
+                                             secret=creds["s3_secret"]))
+    assert_logged_in_as(ol, creds["account"])
+    return ol
+
+
+# ---------------------------------------------------------------------------
+# Classifying a single stored field item
+# ---------------------------------------------------------------------------
+def classify_item(item) -> tuple[str, str | None]:
+    """Classify one item from a stored Tag field.
+
+    Returns one of:
+        ("ref", key)            - already a {"key": "/tags/OL..T"} ref
+        ("strkey", key)         - a bare "/tags/OL..T" string
+        ("unclassifiable", repr) - a name string, a non-Tag path, or junk
+    """
+    if isinstance(item, dict):
+        key = item.get("key")
+        if isinstance(key, str) and TAG_KEY_RE.match(key):
+            return ("ref", key)
+        return ("unclassifiable", json.dumps(item))
+    if isinstance(item, str):
+        if TAG_KEY_RE.match(item):
+            return ("strkey", item)
+        return ("unclassifiable", item)
+    return ("unclassifiable", repr(item))
+
+
+# ---------------------------------------------------------------------------
+# Resolving a Tag key against production (live / redirect / deleted)
+# ---------------------------------------------------------------------------
+class TagResolver:
+    """Resolve a Tag key to its live canonical key, following redirects and
+    detecting deletions. Results are cached for the life of the run.
+
+    resolve(key) -> one of:
+        ("live", key)            - a live /type/tag (possibly via redirect, see "redirect")
+        ("redirect", target_key) - resolved through one or more redirects to a live tag
+        ("deleted", None)        - a genuine deletion: HTTP-200 doc of type /type/delete
+        ("unresolved", None)     - could NOT be resolved (404, non-dict type, redirect with no
+                                   location, loop, or unknown type). The caller must treat this
+                                   as unclassifiable and SKIP the work -- never as a drop.
+
+    Only a definitive /type/delete is ever dropped; a 404 is *unknown*, not a deletion, so it
+    must not silently remove a tag from a work (adversarial review H1). Non-definitive verdicts
+    are not cached, so a transient failure can succeed on a later resolve.
+    """
+
+    def __init__(self, fetch=None, max_depth: int = 10, retries: int = 3):
+        self._fetch = fetch or self._http_fetch
+        self._cache: dict[str, tuple[str, str | None]] = {}
+        self.max_depth = max_depth
+        self.retries = retries
+
+    def _http_fetch(self, key: str):
+        """GET a tag doc from production; return the JSON dict, None on 404, or raise
+        (after retries) on any other error so the caller records it as unresolved."""
+        last = None
+        for attempt in range(self.retries):
+            try:
+                resp = requests.get(f"{OL}{key}.json", headers={"User-Agent": USER_AGENT}, timeout=30)
+                if resp.status_code == 404:
+                    return None
+                resp.raise_for_status()
+                return resp.json()
+            except Exception as e:  # noqa: BLE001
+                last = e
+                time.sleep(2 * (attempt + 1))
+        raise last
+
+    def resolve(self, key: str) -> tuple[str, str | None]:
+        if key in self._cache:
+            return self._cache[key]
+        result = self._resolve_uncached(key)
+        # Only cache definitive verdicts; let transient failures be retried later.
+        if result[0] != "unresolved":
+            self._cache[key] = result
+        return result
+
+    def _resolve_uncached(self, key: str) -> tuple[str, str | None]:
+        origin = key
+        seen: set[str] = set()
+        redirected = False
+        for _ in range(self.max_depth):
+            if key in seen:  # redirect loop -> can't resolve
+                return ("unresolved", None)
+            seen.add(key)
+            try:
+                doc = self._fetch(key)
+            except Exception as e:  # noqa: BLE001
+                logger.warning("tag fetch failed %s: %s", key, e)
+                return ("unresolved", None)
+            if doc is None:  # 404: unknown, NOT a deletion
+                return ("unresolved", None)
+            typ = doc.get("type")
+            typ = typ.get("key") if isinstance(typ, dict) else None
+            if typ == "/type/tag":
+                return ("redirect", key) if redirected else ("live", key)
+            if typ == "/type/redirect":
+                loc = doc.get("location")
+                if not loc:
+                    return ("unresolved", None)
+                redirected = True
+                key = loc
+                continue
+            if typ == "/type/delete":
+                return ("deleted", None)
+            # unknown/missing type -> don't guess; skip the work
+            return ("unresolved", None)
+        logger.warning("redirect chain too deep from %s", origin)
+        return ("unresolved", None)
+
+
+# ---------------------------------------------------------------------------
+# Normalizing one field
+# ---------------------------------------------------------------------------
+@dataclass
+class NormalizeResult:
+    new_refs: list[dict]
+    resolutions: list[dict] = dc_field(default_factory=list)
+    unclassifiable: list = dc_field(default_factory=list)
+    changed: bool = False
+
+
+def normalize_field(values, resolver: TagResolver) -> NormalizeResult:
+    """Turn a stored field value (list of strings and/or refs) into a clean,
+    deduped, order-preserving list of refs, following redirects and dropping
+    deleted Tags. An unclassifiable value is reported (and leaves new_refs as a
+    best-effort), so the caller can decide to skip the whole work.
+    """
+    if not isinstance(values, list):
+        return NormalizeResult(new_refs=[], unclassifiable=[values], changed=False)
+
+    seen: set[str] = set()
+    new_refs: list[dict] = []
+    resolutions: list[dict] = []
+    unclassifiable: list = []
+
+    for item in values:
+        kind, val = classify_item(item)
+        if kind == "unclassifiable":
+            unclassifiable.append(val)
+            continue
+        action, target = resolver.resolve(val)
+        if action == "unresolved":
+            # 404/unknown: cannot safely classify -> report, so the work is skipped.
+            unclassifiable.append(val)
+            continue
+        if action == "deleted":
+            resolutions.append({"from": val, "to": None, "action": "drop"})
+            continue
+        if action == "redirect":
+            resolutions.append({"from": val, "to": target, "action": "redirect"})
+        key = target
+        if key not in seen:
+            seen.add(key)
+            new_refs.append({"key": key})
+
+    changed = (new_refs != values) or bool(resolutions)
+    return NormalizeResult(
+        new_refs=new_refs,
+        resolutions=resolutions,
+        unclassifiable=unclassifiable,
+        changed=changed,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Converting a whole work
+# ---------------------------------------------------------------------------
+@dataclass
+class ConvertResult:
+    status: str                      # "changed" | "nochange" | "skipped"
+    new_work: dict | None = None
+    audit_rows: list[dict] = dc_field(default_factory=list)
+    skip_reason: str = ""
+
+
+def convert_work(work: dict, fields, resolver: TagResolver) -> ConvertResult:
+    """Convert the named Tag fields on one work dict. Returns a new dict with
+    only those fields rewritten (all other fields preserved exactly), or a skip
+    when any value can't be classified.
+    """
+    work_key = work.get("key", "<unknown>")
+    changes: dict[str, NormalizeResult] = {}
+    bad: list[str] = []
+
+    for f in fields:
+        if f not in work:
+            continue
+        res = normalize_field(work[f], resolver)
+        if res.unclassifiable:
+            bad.append(f"{f}={res.unclassifiable}")
+            continue
+        # Guard: never empty a previously non-empty field (all values dropped as
+        # deleted). Skip and report so an operator can look (adversarial review H1).
+        if res.changed and not res.new_refs and work[f]:
+            bad.append(f"{f}: all values resolved deleted -> would empty field")
+            continue
+        if res.changed:
+            changes[f] = res
+
+    if bad:
+        return ConvertResult(
+            status="skipped",
+            skip_reason=f"{work_key}: unclassifiable values: {'; '.join(bad)}",
+        )
+    if not changes:
+        return ConvertResult(status="nochange")
+
+    new_work = dict(work)  # shallow copy; we only replace whole top-level fields
+    audit_rows = []
+    for f, res in changes.items():
+        new_work[f] = res.new_refs
+        audit_rows.append({
+            "work": work_key,
+            "field": f,
+            "before": work[f],
+            "after": res.new_refs,
+            "resolutions": res.resolutions,
+            "revision": work.get("revision"),  # revision we based the write on (staleness forensics)
+        })
+    return ConvertResult(status="changed", new_work=new_work, audit_rows=audit_rows)
+
+
+# ---------------------------------------------------------------------------
+# Batched save with bisect-on-failure (save_many is atomic)
+# ---------------------------------------------------------------------------
+def save_with_bisect(save_fn, docs) -> tuple[list[dict], list[str]]:
+    """Save `docs` via save_fn(batch) -> bool. On an atomic failure, bisect the
+    batch to isolate the offending work(s). Returns (saved_docs, failed_keys).
+    """
+    if not docs:
+        return [], []
+    if save_fn(docs):
+        return list(docs), []
+    if len(docs) == 1:
+        return [], [docs[0].get("key", "<unknown>")]
+    mid = len(docs) // 2
+    left_ok, left_bad = save_with_bisect(save_fn, docs[:mid])
+    right_ok, right_bad = save_with_bisect(save_fn, docs[mid:])
+    return left_ok + right_ok, left_bad + right_bad
+
+
+# ---------------------------------------------------------------------------
+# Run orchestration (used by `convert`; takes injected works/saver for tests)
+# ---------------------------------------------------------------------------
+def _wait_while_paused(pause_file, poll: float = 10.0, _sleep=time.sleep, _exists=None) -> bool:
+    """Block while `pause_file` exists; return True iff we actually paused.
+
+    Lets an operator halt a live run cleanly between batches (e.g. during the
+    #14229 deploy->retype window, when a converted work would be indexed with no
+    genre_key and never reindexed) by touching the file, and resume by removing it.
+    The --done checkpoint already makes a stop/restart safe; this keeps the SAME
+    process paused so no re-invocation is needed.
+    """
+    if _exists is None:
+        _exists = lambda p: Path(p).exists()
+    if not pause_file or not _exists(pause_file):
+        return False
+    logger.warning("PAUSED: %r present; polling every %ss until it is removed", pause_file, poll)
+    while _exists(pause_file):
+        _sleep(poll)
+    logger.info("resumed: %r removed", pause_file)
+    return True
+
+
+def _stamp_audit_row(row: dict, run_id: str, comment: str) -> None:
+    """Attach run metadata to an audit row (shared by the main loop and the F2
+    re-convert path)."""
+    row["run_id"] = run_id
+    row["comment"] = comment
+    row["ts"] = datetime.now(timezone.utc).isoformat()
+
+
+def recheck_batch(docs, rows, fields, resolver: TagResolver, refetch,
+                  run_id: str, comment: str, report: dict):
+    """Re-fetch a batch right before the save and reconcile it against the live
+    revision, so no work is saved from a stale copy (F2).
+
+    For each pending doc: if the live revision equals the one we converted from,
+    keep our converted doc; if it moved, re-convert from the fresh copy (preserving
+    the concurrent edit) or drop it if it no longer needs changing; if it is gone,
+    drop it. If the re-fetch returns nothing at all (a fetch failure), the whole
+    batch is skipped so nothing is saved unverified - resume re-attempts it.
+
+    Returns (final_docs, final_rows).
+    """
+    keys = [d["key"] for d in docs]
+    fresh = refetch(keys)
+    if not fresh:
+        logger.error("re-check: re-fetch returned nothing for %d works; NOT saving this "
+                     "batch (resume will re-attempt it)", len(keys))
+        return [], []
+    rows_by_key: dict[str, list] = {}
+    for r in rows:
+        rows_by_key.setdefault(r["work"], []).append(r)
+    final_docs: list[dict] = []
+    final_rows: list[dict] = []
+    for d in docs:
+        key = d["key"]
+        base_rev = d.get("revision")
+        cur = fresh.get(key)
+        if cur is None:
+            report["stale_dropped"] += 1
+            logger.warning("re-check: %s not returned by re-fetch (deleted/merged?); dropped", key)
+            continue
+        if cur.get("revision") == base_rev:
+            final_docs.append(d)
+            final_rows.extend(rows_by_key.get(key, []))
+            continue
+        logger.warning("re-check: %s revision %s->%s since convert; re-converting from the "
+                       "fresh copy", key, base_rev, cur.get("revision"))
+        r2 = convert_work(cur, fields, resolver)
+        if r2.status != "changed":
+            report["stale_dropped"] += 1
+            logger.info("re-check: %s is %s after re-convert; dropped from batch", key, r2.status)
+            continue
+        report["reconverted"] += 1
+        for row in r2.audit_rows:
+            _stamp_audit_row(row, run_id, comment)
+        final_docs.append(r2.new_work)
+        final_rows.extend(r2.audit_rows)
+    return final_docs, final_rows
+
+
+def fetch_works_many(ol, keys: list, retries: int = 3) -> dict:
+    """Bulk re-fetch works via /api/get_many using the run's session; returns
+    {key: work}. Missing keys are omitted. Returns {} on repeated failure (the
+    caller then skips the batch rather than saving unverified)."""
+    import json as _json
+    params = {"keys": _json.dumps(keys)}
+    for attempt in range(retries):
+        try:
+            resp = ol.session.get(f"{ol.base_url}/api/get_many", params=params, timeout=60)
+            resp.raise_for_status()
+            data = resp.json()
+            if data.get("status") == "ok":
+                return data.get("result", {})
+            logger.warning("re-fetch /api/get_many status=%s; retry %d/%d",
+                           data.get("status"), attempt + 1, retries)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("re-fetch batch failed (%s); retry %d/%d", e, attempt + 1, retries)
+            time.sleep(2 ** attempt)
+    logger.error("re-fetch failed after %d tries for %d keys", retries, len(keys))
+    return {}
+
+
+def find_straggler_keys(dump_lines, fields, done_keys):
+    """Post-run completeness control against the monthly works dump (L4).
+
+    A single offset sweep (even re-swept) can deterministically skip the same key, so
+    this cross-checks a source that does NOT share that blind spot: the dump. Yields
+    work keys whose any `fields` value still holds a bare "/tags/..." STRING (i.e.
+    unconverted), excluding keys the run already handled (`done_keys`). Feed the output
+    to `convert --keys` for a final pass. Works edited AFTER the dump's cutoff aren't in
+    it - they rely on the live sweep (and are caught by next month's dump).
+
+    `dump_lines` is an iterable of dump TSV rows (type\\tkey\\trev\\tlast_modified\\tjson).
+    """
+    for line in dump_lines:
+        parts = line.rstrip("\n").split("\t")
+        if len(parts) < 5:
+            continue
+        key = parts[1].strip()
+        if key in done_keys:
+            continue
+        try:
+            work = json.loads(parts[4])
+        except (json.JSONDecodeError, ValueError):
+            continue
+        for f in fields:
+            val = work.get(f)
+            if isinstance(val, list) and any(
+                    isinstance(v, str) and v.startswith("/tags/") for v in val):
+                yield key
+                break
+
+
+def classify_revision_gap(base_rev: int, current_rev):
+    """Post-run verify signal (F2 backstop). The OL version API exposes no
+    per-revision author, so classify by the revision gap:
+    - current == base + 1  -> 'clean'      (our edit is the only change since we read it)
+    - current  > base + 1  -> 'recheck'    (other revision(s) landed; maybe a concurrent
+                                            edit we reverted, maybe benign later edits)
+    - current <= base      -> 'anomaly'    (our edit missing / rolled back)
+    - current is None      -> 'unfetchable'
+    """
+    if current_rev is None:
+        return "unfetchable"
+    if current_rev <= base_rev:
+        return "anomaly"
+    if current_rev == base_rev + 1:
+        return "clean"
+    return "recheck"
+
+
+def verify_audit(audit_rows, fetch_rev, saved_revs=None):
+    """Read audit rows and return the works that need a manual re-check.
+
+    Two signals (ruling 1):
+    - EXACT, when `saved_revs[work]` (the revision save_many reported for our write)
+      is known: clean iff saved == base+1 (nobody wrote between our read and write);
+      saved > base+1 means an intervening write (possible revert) -> flag; later edits
+      after our save are NOT flagged. No network call.
+    - GAP fallback, otherwise: compare the current live revision to base. This
+      over-flags benign later edits (safe direction) and is used when the save
+      response carried no revision.
+
+    `fetch_rev(work_key) -> current_revision`. Uses the smallest base revision per work.
+    """
+    by_work: dict[str, int] = {}
+    null_rev_works: set[str] = set()
+    for r in audit_rows:
+        rev = r.get("revision")
+        work = r["work"]
+        if rev is None:
+            null_rev_works.add(work)
+            continue
+        by_work[work] = min(by_work.get(work, rev), rev)
+    flagged = []
+    for work, base in sorted(by_work.items()):
+        if saved_revs and work in saved_revs:
+            saved = saved_revs[work]
+            status = classify_revision_gap(base, saved)
+            if status != "clean":
+                flagged.append({"work": work, "base_revision": base,
+                                "saved_revision": saved, "method": "exact", "status": status})
+        else:
+            cur = fetch_rev(work)
+            status = classify_revision_gap(base, cur)
+            if status != "clean":
+                flagged.append({"work": work, "base_revision": base,
+                                "current_revision": cur, "method": "gap", "status": status})
+    # L2: a work whose rows carry no base revision can't be gap-checked - surface it
+    # for a manual re-check rather than silently dropping it from the backstop.
+    for work in sorted(null_rev_works - by_work.keys()):
+        flagged.append({"work": work, "base_revision": None,
+                        "current_revision": fetch_rev(work), "method": "gap",
+                        "status": "unverifiable"})
+    return flagged
+
+
+def run_conversion(
+    works,
+    fields,
+    resolver: TagResolver,
+    saver,
+    write: bool,
+    batch_size: int,
+    run_id: str,
+    comment: str,
+    audit_fp=None,
+    done_fp=None,
+    pause_file=None,
+    pause_poll: float = 10.0,
+    refetch=None,
+    saved_revs=None,
+) -> dict:
+    """Drive the conversion over an iterable of work dicts.
+
+    `saver(batch, comment) -> bool` is only ever called when write is True.
+    `refetch(keys) -> {key: work}` (optional) re-fetches the batch immediately
+    before the save so a work whose revision moved since we converted it is
+    re-converted from the fresh copy rather than saved stale (F2). Returns a
+    summary report with per-category counts.
+    """
+    report = {
+        "run_id": run_id, "would_change": 0, "saved": 0, "failed": 0,
+        "nochange": 0, "skipped": 0, "redirects": 0, "drops": 0,
+        "reconverted": 0, "stale_dropped": 0,
+    }
+    batch: list[dict] = []
+    pending_audit: list[dict] = []
+
+    def flush():
+        if not batch:
+            return
+        # Snapshot and reset first, so we never hand the saver a list we then clear.
+        docs = list(batch)
+        rows = list(pending_audit)
+        batch.clear()
+        pending_audit.clear()
+        if not write:
+            return
+        # Honor an operator pause BEFORE touching the audit log or saving, so a
+        # paused run leaves no half-written batch (the deploy->retype window).
+        # (Pause goes here, NOT between the re-check and the save below, so nothing
+        # widens the F2 window.)
+        _wait_while_paused(pause_file, pause_poll)
+        # F2: re-fetch the batch and drop/re-convert any work whose revision moved
+        # since we converted it, so we never save from a stale copy. This runs as
+        # late as possible - immediately before the save, with no sleep between -
+        # so the residual window is only re-check -> save.
+        if refetch is not None:
+            docs, rows = recheck_batch(docs, rows, fields, resolver, refetch,
+                                       run_id, comment, report)
+            if not docs:
+                return
+        # Audit-before-save (adversarial review M3): write the intended changes
+        # FIRST, so a crash mid-flush still leaves a reversible record. Undo is
+        # idempotent, so an audit row for a save that then fails is harmless
+        # (before == current). The done-file, by contrast, records only works that
+        # actually saved, so resume re-attempts anything not confirmed written.
+        if audit_fp:
+            for row in rows:
+                audit_fp.write(json.dumps(row) + "\n")
+            audit_fp.flush()
+        saved, failed = save_with_bisect(lambda b: bool(saver(b, comment)), docs)
+        report["saved"] += len(saved)
+        report["failed"] += len(failed)
+        if done_fp:
+            for doc in saved:
+                k = doc["key"]
+                # Record our saved revision next to the key (ruling 1: exact verify
+                # signal). Resume reads the first tab-field, so this stays compatible.
+                if saved_revs and k in saved_revs:
+                    done_fp.write(f"{k}\t{saved_revs[k]}\n")
+                else:
+                    done_fp.write(k + "\n")
+            done_fp.flush()
+        for fk in failed:
+            logger.error("save failed (isolated): %s", fk)
+
+    for work in works:
+        res = convert_work(work, fields, resolver)
+        if res.status == "skipped":
+            report["skipped"] += 1
+            logger.warning(res.skip_reason)
+            continue
+        if res.status == "nochange":
+            report["nochange"] += 1
+            continue
+        # changed
+        report["would_change"] += 1
+        for row in res.audit_rows:
+            _stamp_audit_row(row, run_id, comment)
+            report["redirects"] += sum(1 for r in row["resolutions"] if r["action"] == "redirect")
+            report["drops"] += sum(1 for r in row["resolutions"] if r["action"] == "drop")
+            if not write:
+                logger.info("[DRY] %s %s: %s -> %s",
+                            row["work"], row["field"], row["before"], row["after"])
+        batch.append(res.new_work)
+        pending_audit.extend(res.audit_rows)
+        if len(batch) >= batch_size:
+            flush()
+
+    flush()
+    return report
+
+
+# ---------------------------------------------------------------------------
+# Live helpers (network) used by the CLI
+# ---------------------------------------------------------------------------
+def enumerate_work_keys(field: str, limit: int = 1000, max_keys: int | None = None,
+                        throttle: float = 0.0):
+    """Yield work keys that store `field` as a string, via query.json ~=* paging.
+
+    This is ONE offset sweep. Offset paging over a live, mutating set with no stable
+    order can both duplicate a row (harmless - convert is idempotent) and SKIP a row
+    (silent data loss - the work is never converted). For a real run use
+    `enumerate_work_keys_converged`, which repeats this sweep until coverage is
+    stable; this single-pass generator is for the capped sampling/test path.
+
+    `throttle` sleeps that many seconds after each non-empty page so a full
+    (~900K-key) prod sweep stays polite.
+    """
+    offset = 0
+    seen = 0
+    while True:
+        url = (f"{OL}/query.json?type=/type/work&{field}~=*"
+               f"&limit={limit}&offset={offset}")
+        rows = requests.get(url, headers={"User-Agent": USER_AGENT}, timeout=60).json()
+        if not rows:
+            break
+        for r in rows:
+            yield r["key"]
+            seen += 1
+            if max_keys and seen >= max_keys:
+                return
+        offset += limit
+        if throttle:
+            time.sleep(throttle)
+
+
+def enumerate_work_keys_converged(field: str, limit: int = 1000, throttle: float = 0.0,
+                                  max_passes: int = 5, _enum=None):
+    """Repeat the offset sweep until coverage is stable, to guard against skips (F1).
+
+    A single `enumerate_work_keys` sweep pages by offset over a live, mutating set
+    with no stable order, so it can silently SKIP a work (not just duplicate one) -
+    and nothing downstream notices the omission. This re-runs the sweep, unioning
+    the keys, until a pass adds NO new key (coverage has stabilised) or `max_passes`
+    is reached. Because each pass's skips are independent, the union converges to
+    full coverage. At least two passes are always required (one sweep can never be
+    proven complete).
+
+    Returns (sorted_unique_keys, converged, per_pass_new). A non-converged result
+    is logged loudly and the caller MUST treat the key set as possibly incomplete.
+    `_enum` injects the single-pass generator (for tests).
+    """
+    if _enum is None:
+        _enum = enumerate_work_keys
+    keys: set[str] = set()
+    per_pass_new: list[int] = []
+    converged = False
+    for p in range(1, max_passes + 1):
+        before = len(keys)
+        for key in _enum(field, limit=limit, throttle=throttle):
+            keys.add(key)
+        new = len(keys) - before
+        per_pass_new.append(new)
+        logger.info("enumerate pass %d/%d: +%d new (total %d)", p, max_passes, new, len(keys))
+        if p >= 2 and new == 0:
+            converged = True
+            break
+    if not converged:
+        logger.warning(
+            "enumerate DID NOT CONVERGE in %d passes (last pass +%d new); the key set "
+            "may be INCOMPLETE - rerun with a larger --max-passes before a real run",
+            max_passes, per_pass_new[-1])
+    return sorted(keys), converged, per_pass_new
+
+
+def fetch_work(key: str) -> dict:
+    resp = requests.get(f"{OL}{key}.json", headers={"User-Agent": USER_AGENT}, timeout=30)
+    resp.raise_for_status()
+    return resp.json()
+
+
+def is_transient_failure(status: int | None = None, exc: Exception | None = None) -> bool:
+    """Whether a save failure is worth retrying. A 4xx is deterministic (a bad/dead
+    ref, a malformed doc) - retrying wastes minutes before the bisect isolates it -
+    so only 429 and 5xx, and network-level exceptions, are transient (dewey #3)."""
+    if exc is not None:
+        return True  # connection reset / timeout / DNS etc.
+    if status is None:
+        return False
+    return status == 429 or status >= 500
+
+
+def _parse_saved_revs(resp) -> dict:
+    """Parse /api/save_many's response body into {key: revision}. Infobase returns
+    a list of {"key", "revision"} for each saved doc (infogami infobase.py). Returns
+    {} for any other shape or an unparseable body, so verify falls back to the gap
+    method (ruling 1)."""
+    try:
+        data = resp.json()
+    except Exception:  # noqa: BLE001
+        return {}
+    out = {}
+    if isinstance(data, list):
+        for item in data:
+            if isinstance(item, dict) and "key" in item and "revision" in item:
+                out[item["key"]] = item["revision"]
+    return out
+
+
+def make_saver(ol, throttle: float, retries: int = 3, saved_revs: dict | None = None):
+    """Return a saver(batch, comment) -> bool.
+
+    Posts the raw work dicts straight to /api/save_many via the shared
+    save_many_dicts() helper (the same faithful raw POST backfill_tags uses) -
+    deliberately NOT olclient's save_many(), which re-serializes through its Work
+    model. Retries only TRANSIENT failures with backoff; a deterministic 4xx
+    returns False at once so the bisect isolates the offending work fast. Always
+    returns False (never raises) so a batch failure is handled by the bisect.
+
+    If `saved_revs` is given, the revision save_many reports for each saved doc is
+    recorded there (ruling 1: the exact verify signal).
+    """
+    def saver(batch, comment):
+        last = None
+        for attempt in range(retries):
+            try:
+                r = save_many_dicts(ol, batch, comment)
+                status = getattr(r, "status_code", 500)
+                if status == 200:
+                    if saved_revs is not None:
+                        saved_revs.update(_parse_saved_revs(r))
+                    if throttle:
+                        time.sleep(throttle)
+                    return True
+                last = f"{status} {getattr(r, 'text', '')[:200]}"
+                if not is_transient_failure(status=status):
+                    logger.error("save_many deterministic failure (%s); not retrying", last)
+                    return False
+            except Exception as e:  # noqa: BLE001
+                last = str(e)
+                if not is_transient_failure(exc=e):
+                    return False
+            wait = 30 * (attempt + 1)
+            logger.warning("save_many transient failure (%s); waiting %ss retry %d/%d",
+                           last, wait, attempt + 1, retries)
+            time.sleep(wait)
+        logger.error("save_many giving up on batch of %d: %s", len(batch), last)
+        return False
+    return saver
+
+
+# ---------------------------------------------------------------------------
+# CLI argument / undo policy helpers (pure, unit-tested)
+# ---------------------------------------------------------------------------
+def require_audit_for_write(write: bool, audit, done) -> None:
+    """A real run must be reversible and resumable: --write requires both --audit
+    and --done (dewey #1)."""
+    if write and (not audit or not done):
+        parser_error("--write requires both --audit <file> and --done <file> "
+                     "(a real run must be reversible and resumable)")
+
+
+def undo_decision(live_value, before, after) -> str:
+    """Decide how to undo one audit row given the field's current live value:
+        "restore"       - live == after: our change is intact, revert to before
+        "skip-noop"     - live == before: already at before (reverted, or the save
+                          had failed) - nothing to do
+        "skip-conflict" - live is something else: edited since our run - do NOT
+                          clobber it (dewey #2)
+    """
+    # An absent field and an empty list are equivalent in our model (a tag added to an
+    # absent field is undone by REMOVING the key), so a re-undo sees live=None; treat
+    # it as [] when `before` is also empty, so the re-run reports noop, not a false
+    # conflict. (When `before` is non-empty, a now-absent field is a real conflict.)
+    if live_value is None and not before:
+        live_value = before
+    if live_value == after:
+        return "restore"
+    if live_value == before:
+        return "skip-noop"
+    return "skip-conflict"
+
+
+def order_undo_rows(rows):
+    """Newest-first, so multiple runs on one work unwind in reverse order (dewey #2)."""
+    return sorted(rows, key=lambda r: r.get("ts", ""), reverse=True)
+
+
+# ---------------------------------------------------------------------------
+# CLI
+# ---------------------------------------------------------------------------
+def cmd_enumerate(args):
+    if args.max_keys:
+        # Sampling/test mode: a single capped, streamed pass (no completeness guard).
+        logger.warning("--max-keys: single capped sweep, NO completeness guard - this "
+                       "snapshot is NOT verified complete; do not feed it to a real "
+                       "--write run. Omit --max-keys for the converged full sweep.")
+        out = open(args.out, "w") if args.out else sys.stdout
+        n = 0
+        for key in enumerate_work_keys(args.field, max_keys=args.max_keys, throttle=args.throttle):
+            out.write(key + "\n")
+            n += 1
+            if n % 10000 == 0:
+                logger.info("enumerated %d", n)
+        if args.out:
+            out.close()
+        logger.info("enumerated %d work keys (capped at --max-keys) for field %s", n, args.field)
+        return
+
+    keys, converged, per_pass_new = enumerate_work_keys_converged(
+        args.field, throttle=args.throttle, max_passes=args.max_passes)
+    out = open(args.out, "w") if args.out else sys.stdout
+    for key in keys:
+        out.write(key + "\n")
+    if args.out:
+        out.close()
+    logger.info("enumerated %d unique work keys for field %s (per-pass new=%s, converged=%s)",
+                len(keys), args.field, per_pass_new, converged)
+    if not converged:
+        # Exit non-zero so an operator's run script does not treat an incomplete
+        # snapshot as a complete one.
+        sys.exit(2)
+
+
+def cmd_convert(args):
+    require_audit_for_write(args.write, args.audit, args.done)
+    fields = [f.strip() for f in args.fields.split(",") if f.strip()]
+    for f in fields:
+        if f not in KNOWN_TAG_FIELDS:
+            parser_error(f"unknown field {f!r}; known: {KNOWN_TAG_FIELDS}")
+
+    run_id = args.run_id or datetime.now(timezone.utc).strftime("convert-%Y%m%d%H%M%S")
+    comment = args.comment or DEFAULT_COMMENT
+
+    already_done = set()
+    if args.done and Path(args.done).exists():
+        # A done line is "key" or "key\t<saved_rev>" (ruling 1); take the key.
+        already_done = {l.split("\t")[0].strip() for l in open(args.done) if l.strip()}
+        logger.info("resuming: %d keys already done", len(already_done))
+
+    keys = [l.strip() for l in open(args.keys) if l.strip() and l.strip() not in already_done]
+    logger.info("%d keys to process (run_id=%s, write=%s)", len(keys), run_id, args.write)
+
+    resolver = TagResolver()
+
+    def works_iter():
+        for k in keys:
+            try:
+                yield fetch_work(k)
+            except Exception as e:  # noqa: BLE001
+                logger.error("fetch failed %s: %s", k, e)
+
+    ol = get_write_session(args.creds) if args.write else None
+    # Ruling 1: record the revision save_many reports for each saved doc, so verify
+    # can use the exact signal (saved_rev vs base_rev) instead of the live-revision gap.
+    saved_revs = {} if args.write else None
+    saver = make_saver(ol, args.throttle, saved_revs=saved_revs) if args.write else (lambda b, c: True)
+    # F2: on a real run, re-fetch each batch right before saving (uses the run's
+    # session). Only needed when writing; dry-run never reaches the save path.
+    refetch = (lambda batch_keys: fetch_works_many(ol, batch_keys)) if args.write else None
+
+    # Audit and done-file are reversibility/resume artifacts of a real run; a
+    # dry-run must not append to them (adversarial review L4). Dry-run shows its
+    # diff via the [DRY] log lines instead.
+    audit_fp = open(args.audit, "a") if (args.audit and args.write) else None
+    done_fp = open(args.done, "a") if (args.done and args.write) else None
+    try:
+        report = run_conversion(
+            works=works_iter(), fields=fields, resolver=resolver, saver=saver,
+            write=args.write, batch_size=args.batch_size, run_id=run_id,
+            comment=comment, audit_fp=audit_fp, done_fp=done_fp,
+            pause_file=args.pause_file, pause_poll=args.pause_poll, refetch=refetch,
+            saved_revs=saved_revs,
+        )
+    finally:
+        if audit_fp:
+            audit_fp.close()
+        if done_fp:
+            done_fp.close()
+    logger.info("DONE %s", json.dumps(report))
+    if not args.write:
+        logger.info("DRY-RUN: no writes performed. Re-run with --write to apply.")
+
+
+def cmd_undo(args):
+    """Reverse a run from its audit log.
+
+    F5 - ordering matters: undo restores the prior **string** form of each field. A
+    save holding strings is only accepted while production `/type/work` does NOT
+    declare the field with `expected_type /type/tag`; once declared, Infobase rejects
+    a string-form save and undo cannot reverse those works. Note #14229 edits
+    `work.type` in the repo, and a deploy does NOT change prod's `/type/work`
+    document (it is rev 14 in the database) - so this risk only arises if someone
+    declares the field by hand. Run undo BEFORE any such declaration.
+    """
+    run_id = f"undo-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}"
+    rows = order_undo_rows([json.loads(l) for l in open(args.audit) if l.strip()])
+    logger.info("undo: %d audit rows, newest-first (write=%s)", len(rows), args.write)
+    ol = get_write_session(args.creds) if args.write else None
+    saver = make_saver(ol, args.throttle) if args.write else (lambda b, c: True)
+    counts = {"restored": 0, "noop": 0, "conflict": 0, "error": 0}
+    for row in rows:
+        try:
+            work = fetch_work(row["work"])
+        except Exception as e:  # noqa: BLE001
+            logger.error("undo fetch failed %s: %s", row["work"], e)
+            counts["error"] += 1
+            continue
+        decision = undo_decision(work.get(row["field"]), row["before"], row["after"])
+        if decision == "skip-noop":
+            counts["noop"] += 1
+            continue
+        if decision == "skip-conflict":
+            counts["conflict"] += 1
+            logger.warning("undo SKIP (edited since run): %s %s is %r, not our %r",
+                           row["work"], row["field"], work.get(row["field"]), row["after"])
+            continue
+        # restore
+        work[row["field"]] = row["before"]
+        comment = f"Undo {row.get('run_id', '?')} ({run_id})"
+        if args.write:
+            if saver([work], comment):
+                counts["restored"] += 1
+            else:
+                counts["error"] += 1
+        else:
+            logger.info("[DRY] undo %s %s -> %s", row["work"], row["field"], row["before"])
+            counts["restored"] += 1
+    logger.info("undo DONE%s: %s", "" if args.write else " (dry-run)", json.dumps(counts))
+
+
+def cmd_verify(args):
+    """Post-run backstop for F2: read the audit log and flag works needing a re-check.
+
+    With --done (ruling 1), the revision save_many reported for each saved work gives
+    the EXACT signal (saved_rev vs base_rev) with no network call. Without it (or for
+    works the done-file didn't record a revision for), it falls back to comparing the
+    current live revision to base (the gap method, which over-flags benign later edits).
+    Writes the flagged keys to --out (one per line) if given."""
+    rows = [json.loads(l) for l in open(args.audit) if l.strip()]
+
+    saved_revs = {}
+    if args.done and Path(args.done).exists():
+        for l in open(args.done):
+            parts = l.rstrip("\n").split("\t")
+            if len(parts) >= 2 and parts[1].strip():
+                try:
+                    saved_revs[parts[0].strip()] = int(parts[1].strip())
+                except ValueError:
+                    pass
+        logger.info("verify: %d saved revisions from --done (exact signal)", len(saved_revs))
+
+    def fetch_rev(key):
+        try:
+            return fetch_work(key).get("revision")
+        except Exception as e:  # noqa: BLE001
+            logger.error("verify fetch failed %s: %s", key, e)
+            return None
+
+    flagged = verify_audit(rows, fetch_rev, saved_revs=saved_revs)
+    for f in flagged:
+        rev = f.get("saved_revision", f.get("current_revision"))
+        logger.info("RECHECK %s base=%s %s=%s via %s (%s)",
+                    f["work"], f["base_revision"],
+                    "saved" if f.get("method") == "exact" else "current", rev,
+                    f.get("method"), f["status"])
+    logger.info("verify: %d audit rows, %d works flagged for re-check", len(rows), len(flagged))
+    if args.out:
+        with open(args.out, "w") as fh:
+            for f in flagged:
+                fh.write(f["work"] + "\n")
+
+
+def cmd_dump_stragglers(args):
+    """L4 post-run completeness check: list works the monthly dump shows still holding
+    a bare /tags/ string, minus the ones this run converted (--done). Feed --out to
+    `convert --keys` for a final pass."""
+    fields = [f.strip() for f in args.fields.split(",") if f.strip()]
+    done_keys = set()
+    if args.done and Path(args.done).exists():
+        done_keys = {l.split("\t")[0].strip() for l in open(args.done) if l.strip()}
+    out = open(args.out, "w") if args.out else sys.stdout
+    n = 0
+    with gzip.open(args.dump, "rt", errors="replace") as f:
+        for key in find_straggler_keys(f, fields, done_keys):
+            out.write(key + "\n")
+            n += 1
+    if args.out:
+        out.close()
+    logger.info("dump-stragglers: %d works in %s still hold a bare /tags/ string and are "
+                "not in --done (feed --out to `convert --keys`)", n, fields)
+
+
+def parser_error(msg):
+    raise SystemExit(f"error: {msg}")
+
+
+def build_parser():
+    p = argparse.ArgumentParser(description="Convert stored Tag fields on works to refs (#13929)")
+    sub = p.add_subparsers(dest="cmd", required=True)
+
+    e = sub.add_parser("enumerate", help="snapshot affected work keys via query.json")
+    e.add_argument("--field", default="genres")
+    e.add_argument("--out", help="output file (default stdout)")
+    e.add_argument("--max-keys", type=int, default=None,
+                   help="cap the sweep (sampling/test mode; disables the completeness guard)")
+    e.add_argument("--max-passes", type=int, default=5,
+                   help="re-sweep until a pass adds no new key, up to this many passes "
+                        "(completeness guard against offset-paging skips, F1)")
+    e.add_argument("--throttle", type=float, default=0.0,
+                   help="seconds to sleep between query.json pages (polite full sweep)")
+    e.set_defaults(func=cmd_enumerate)
+
+    c = sub.add_parser("convert", help="convert fields on works from a key snapshot")
+    c.add_argument("--keys", required=True, help="file of work keys (from enumerate)")
+    c.add_argument("--fields", default="genres,subgenres")
+    c.add_argument("--write", action="store_true", help="ACTUALLY write (default: dry-run)")
+    c.add_argument("--creds", help="bot credential file (account/s3_access/s3_secret); "
+                   "login identity is asserted against its 'account' before any write. "
+                   "Omit to fall back to ~/.config/ol.ini (identity NOT asserted).")
+    c.add_argument("--batch-size", type=int, default=100)
+    c.add_argument("--throttle", type=float, default=1.0, help="seconds between save_many calls")
+    c.add_argument("--audit", help="append audit JSONL here (feeds --undo)")
+    c.add_argument("--done", help="resumable checkpoint of saved work keys")
+    c.add_argument("--run-id", help="override run id")
+    c.add_argument("--comment", help=f"save comment (default: {DEFAULT_COMMENT!r})")
+    c.add_argument("--pause-file", help="pause between batches while this path exists; resume when removed")
+    c.add_argument("--pause-poll", type=float, default=10.0,
+                   help="seconds between checks of --pause-file (default: 10)")
+    c.set_defaults(func=cmd_convert)
+
+    u = sub.add_parser("undo", help="restore previous values from an audit log (lossless "
+                                    "only while prod /type/work does NOT declare the field; "
+                                    "run undo before any hand declaration - see #14229)")
+    u.add_argument("--audit", required=True)
+    u.add_argument("--write", action="store_true")
+    u.add_argument("--creds", help="bot credential file (see `convert --creds`); "
+                   "identity asserted before any write")
+    u.add_argument("--throttle", type=float, default=1.0)
+    u.set_defaults(func=cmd_undo)
+
+    v = sub.add_parser("verify", help="flag audited works whose revision advanced beyond "
+                                      "our edit (F2 backstop; read-only)")
+    v.add_argument("--audit", required=True)
+    v.add_argument("--done", help="run's done-file (key<TAB>saved_rev) for the exact signal")
+    v.add_argument("--out", help="write flagged work keys here (one per line)")
+    v.set_defaults(func=cmd_verify)
+
+    d = sub.add_parser("dump-stragglers",
+                       help="post-run completeness check (L4): works in the monthly dump "
+                            "still holding bare /tags/ strings, minus --done")
+    d.add_argument("--dump", required=True, help="path to ol_dump_works_latest.txt.gz")
+    d.add_argument("--fields", default="genres,subgenres")
+    d.add_argument("--done", help="run's done-file; its keys are excluded (already converted)")
+    d.add_argument("--out", help="write straggler keys here (feed to `convert --keys`)")
+    d.set_defaults(func=cmd_dump_stragglers)
+    return p
+
+
+def main():
+    args = build_parser().parse_args()
+    args.func(args)
+
+
+if __name__ == "__main__":
+    main()
