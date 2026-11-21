@@ -196,6 +196,77 @@ def cmd_unmapped(args: argparse.Namespace) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Rule - apply Tags to every work a selector matches (dry-run by default)
+# ---------------------------------------------------------------------------
+
+def cmd_rule_apply(args: argparse.Namespace) -> None:
+    """Apply a rule (a YAML file, or inline flags): select works, add Tags, remove subjects."""
+    import json
+
+    from tags.rule import (
+        Rule, apply_rule, build_save_docs, format_plan, load_rule, logged_in_user,
+        plan_rule, resolve_tag_ref, save_many_request,
+    )
+    from tags.utils import get_ol_session, slug_to_tag_key
+
+    # Build the rule from a YAML file, or from inline flags.
+    if args.rule_file:
+        rule = load_rule(args.rule_file, slug_to_tag_key)
+    else:
+        if not (args.subject or args.remove) or not args.add:
+            raise SystemExit("error: give a rule FILE, or --subject/--remove plus --add")
+        tag_keys = [resolve_tag_ref(v, slug_to_tag_key) for v in args.add]
+        subjects = [(s, 1) for s in (args.subject or [])] + [(s, 0) for s in (args.remove or [])]
+        rule = Rule(add_tags=tag_keys, subjects=subjects, subject_type=args.type)
+
+    ol = get_ol_session()
+    plan = plan_rule(ol, rule, limit=args.limit)
+    print(format_plan(plan, args.limit))
+    print()
+
+    # --show-payload: print the exact /api/save_many request, write nothing.
+    if args.show_payload:
+        docs = build_save_docs(ol, plan, comment=args.comment)
+        req = save_many_request(ol, docs, comment=args.comment)
+        print(f"POST {req['url']}")
+        for k, v in req["headers"].items():
+            print(f"  {k}: {v}")
+        print(f"  (would write as: {logged_in_user(ol)})")
+        print(f"\nBODY ({len(docs)} work doc(s)):")
+        print(json.dumps(req["body"], indent=2, ensure_ascii=False))
+        return
+
+    if args.dry_run:
+        summary = apply_rule(ol, plan, comment=args.comment, dry_run=True)
+        print(
+            f"DRY RUN: would write {summary['would_write']:,} works in "
+            f"{summary['batches']} batch(es). Drop --dry-run to apply "
+            f"(or --show-payload to inspect the save_many body)."
+        )
+        return
+
+    # Writing. Confirm unless --yes.
+    n = len(plan.to_write)
+    if n == 0:
+        print("Nothing to write — every examined work already satisfies the rule.")
+        return
+    if not args.yes:
+        who = logged_in_user(ol)
+        answer = input(f"Write {n} work(s) as {who}? [y/N] ").strip().lower()
+        if answer not in ("y", "yes"):
+            print("Aborted.")
+            return
+
+    summary = apply_rule(
+        ol, plan, comment=args.comment, batch_size=args.batch_size,
+        dry_run=False, audit=args.audit, expected_account=args.as_account,
+    )
+    print(f"WROTE {summary['written']:,} of {summary['planned']:,} planned works.")
+    if args.audit:
+        print(f"Reversible audit log: {args.audit}")
+
+
+# ---------------------------------------------------------------------------
 # CLI entry point
 # ---------------------------------------------------------------------------
 
@@ -220,12 +291,43 @@ def main():
     up.add_argument("--top", type=int, default=40, help="Number of top unmapped to show")
     up.add_argument("--progress", type=int, default=None, help="Progress every N works")
 
+    # rule (apply Tags to every work a selector matches; dry-run by default)
+    rp = subparsers.add_parser("rule", help="Apply Tags to works matching a selector")
+    rp_sub = rp.add_subparsers(dest="rule_command", required=True)
+    ra = rp_sub.add_parser("apply", help="Apply a rule (YAML file or inline flags)")
+    ra.add_argument("rule_file", nargs="?", default=None, help="Path to a rule YAML file")
+    ra.add_argument(
+        "--subject", nargs="+", metavar="SUBJECT",
+        help="Inline: subject(s) to select on and KEEP (works matching ANY are selected)",
+    )
+    ra.add_argument(
+        "--remove", nargs="+", metavar="SUBJECT",
+        help="Inline: subject(s) to select on and REMOVE",
+    )
+    ra.add_argument("--type", default="subject", help="subject/person/place/time")
+    ra.add_argument(
+        "--add", nargs="+", metavar="TAG",
+        help="Inline: Tag(s) to add: <tag_type>:<slug> (e.g. literary_form:fiction) or /tags/OL..T",
+    )
+    ra.add_argument("--limit", type=int, default=50, help="Max works to examine/write")
+    ra.add_argument("--batch-size", type=int, default=250, help="Works per save_many batch")
+    ra.add_argument("--comment", default="migrate subject to tag", help="Edit comment")
+    ra.add_argument("--audit", default=None, help="Reversible audit JSONL path (per-field before/after)")
+    ra.add_argument("--dry-run", action="store_true", help="Preview only; write nothing")
+    ra.add_argument("--show-payload", action="store_true", help="Print the exact /api/save_many request; write nothing")
+    ra.add_argument("--as", dest="as_account", default="openlibrarytagsbot",
+                    help="Refuse to write unless the session is this account")
+    ra.add_argument("--yes", action="store_true", help="Skip the confirmation prompt")
+
     args = parser.parse_args()
 
     if args.command == "analyze":
         cmd_analyze(args)
     elif args.command == "unmapped":
         cmd_unmapped(args)
+    elif args.command == "rule":
+        if args.rule_command == "apply":
+            cmd_rule_apply(args)
 
 
 if __name__ == "__main__":
