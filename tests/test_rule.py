@@ -234,7 +234,9 @@ def test_build_save_docs_is_raw_and_lossless():
     assert doc["description"] == {"type": "/type/text", "value": "x"}
     assert doc["literary_forms"] == [{"key": "/tags/OL184T"}]
     assert doc["key"] == "/works/OL1W"
-    assert doc["_comment"] == "migrate"
+    # The comment rides the 42-comment header, not a per-doc property
+    # (/api/save_many rejects _comment as bad_data).
+    assert "_comment" not in doc
 
 
 def _one_work_ol(user=None):

@@ -327,7 +327,8 @@ def build_save_docs(ol, plan: RulePlan, comment: str):
             data[field] = [{"key": k} for k in after]
         for field, (_before, after) in c.subject_changes.items():
             data[field] = list(after)
-        data["_comment"] = comment
+        # NB: the edit comment travels in the "42-comment" header, NOT as a
+        # per-doc "_comment" property — /api/save_many rejects that as bad_data.
         docs.append(data)
     return docs
 
