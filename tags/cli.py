@@ -221,9 +221,10 @@ def cmd_rule_apply(args: argparse.Namespace) -> None:
     ol = get_ol_session()
     rule = Rule(
         add_tags=tag_keys,
-        subject=args.subject,
+        subjects=args.subject,
         subject_type=args.type,
-        strip_subject=args.strip_subject,
+        remove_subjects=args.remove or [],
+        strip_subjects=args.strip_subjects,
     )
     plan = plan_rule(ol, rule, limit=args.limit)
     print(format_plan(plan, args.limit))
@@ -273,14 +274,24 @@ def main():
     rp = subparsers.add_parser("rule", help="Apply Tags to works matching a selector")
     rp_sub = rp.add_subparsers(dest="rule_command", required=True)
     ra = rp_sub.add_parser("apply", help="Select works by subject and add Tag(s)")
-    ra.add_argument("--subject", required=True, help="Exact subject string to select by")
+    ra.add_argument(
+        "--subject", nargs="+", required=True, metavar="SUBJECT",
+        help="One or more exact subject strings; works matching ANY are selected",
+    )
     ra.add_argument("--type", default="subject", help="subject/person/place/time")
     ra.add_argument(
         "--add", nargs="+", required=True, metavar="TAG",
         help="Tag(s) to add: /tags/OL..T key(s) or <type>/<slug> vocabulary ref(s)",
     )
+    ra.add_argument(
+        "--remove", nargs="*", default=None, metavar="SUBJECT",
+        help="Subject string(s) to remove from matched works (default: remove none)",
+    )
     ra.add_argument("--limit", type=int, default=50, help="Max works to examine/write")
-    ra.add_argument("--strip-subject", action="store_true", help="Drop the subject string after tagging")
+    ra.add_argument(
+        "--strip-subjects", action="store_true",
+        help="Shorthand: also remove the selector --subject strings",
+    )
     ra.add_argument("--batch-size", type=int, default=250, help="Works per save_many batch")
     ra.add_argument("--comment", default="migrate subject to tag", help="Edit comment")
     ra.add_argument("--audit", default=None, help="Append-per-batch audit JSONL path")

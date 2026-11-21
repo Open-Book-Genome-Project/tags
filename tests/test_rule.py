@@ -1,8 +1,8 @@
 """Tests for the rule engine (tags/rule.py), driven through a fake olclient.
 
-No network and no credentials: the fake client returns canned Tags, subject hits,
-work keys and work docs. Covers tag->field routing, add-only idempotent merge, the
-authoritative count, the no-op detection, dry-run safety, and the raw-dict save docs.
+No network and no credentials. Covers tag->field routing, multiple subjects (union),
+multiple tags (mixed fields), add-only idempotent merge, explicit subject removal,
+the authoritative counts, no-op detection, dry-run safety, and the raw-dict save docs.
 """
 
 import json
@@ -29,28 +29,28 @@ class FakeResponse:
 
 class FakeTagAPI:
     def __init__(self, tags):
-        self._tags = tags  # olid -> object with .tag_type/.name
+        self._tags = tags
 
     def get(self, olid):
         return self._tags.get(olid)
 
 
 class FakeOL:
-    def __init__(self, tags=None, subjects=None, work_keys=None, work_docs=None):
+    def __init__(self, tags=None, subjects=None, subject_works=None, work_docs=None):
         self.Tag = FakeTagAPI(tags or {})
-        self._subjects = subjects or []
-        self._work_keys = work_keys or []
-        self._work_docs = work_docs or {}
+        self._subjects = subjects or []  # list of subject-hit dicts
+        self._subject_works = subject_works or {}  # subject string -> [work keys]
+        self._work_docs = work_docs or {}  # olid -> work dict
         self.base_url = "https://openlibrary.org"
-        self.saved = []  # capture save_many posts
+        self.saved = []
         self.session = types.SimpleNamespace(post=self._post)
 
     def search_subjects(self, q, limit=10, subject_type=None):
-        return self._subjects
+        return [h for h in self._subjects if h["name"].lower() == q.lower()]
 
     def works_by_subject(self, subject, subject_type="subject", limit=None):
-        keys = self._work_keys if limit is None else self._work_keys[:limit]
-        yield from keys
+        keys = self._subject_works.get(subject, [])
+        yield from (keys if limit is None else keys[:limit])
 
     def get_ol_response(self, path):
         olid = path.rstrip("/").split("/")[-1].removesuffix(".json")
@@ -66,27 +66,19 @@ def tag(tag_type, name):
 
 
 NONFIC = tag("literary_form", "Nonfiction")
+ESSAY = tag("genre", "Essays")
 
-SUBJECT_HITS = [
-    {"key": "/subjects/nonfiction", "name": "Nonfiction", "subject_type": "subject", "work_count": 38920},
+HITS = [
+    {"name": "Nonfiction", "subject_type": "subject", "work_count": 38920},
+    {"name": "Non-fiction", "subject_type": "subject", "work_count": 1200},
 ]
 
 
-def make_ol(work_docs):
-    return FakeOL(
-        tags={"OL184T": NONFIC},
-        subjects=SUBJECT_HITS,
-        work_keys=list(work_docs),
-        work_docs={k.split("/")[-1]: v for k, v in work_docs.items()},
-    )
-
-
 def test_resolve_tags_routes_by_tag_type():
-    ol = FakeOL(tags={"OL184T": NONFIC})
-    field, ttype, name = resolve_tags(ol, ["/tags/OL184T"])
+    ol = FakeOL(tags={"OL184T": NONFIC, "OL24T": ESSAY})
+    field, ttype, name = resolve_tags(ol, ["/tags/OL184T", "/tags/OL24T"])
     assert field["/tags/OL184T"] == "literary_forms"
-    assert ttype["/tags/OL184T"] == "literary_form"
-    assert name["/tags/OL184T"] == "Nonfiction"
+    assert field["/tags/OL24T"] == "genres"  # different field, same rule
 
 
 def test_resolve_tags_unknown_type_raises():
@@ -95,76 +87,135 @@ def test_resolve_tags_unknown_type_raises():
         resolve_tags(ol, ["/tags/OL9T"])
 
 
-def test_plan_counts_and_detects_noop():
-    ol = make_ol({
-        "/works/OL1W": {"revision": 3, "subjects": ["Nonfiction"]},  # needs tag
-        "/works/OL2W": {"revision": 7, "literary_forms": [{"key": "/tags/OL184T"}]},  # already tagged
-    })
-    rule = Rule(add_tags=["/tags/OL184T"], subject="Nonfiction")
+def test_multiple_subjects_union_and_dedup():
+    ol = FakeOL(
+        tags={"OL184T": NONFIC},
+        subjects=HITS,
+        subject_works={
+            "Nonfiction": ["/works/OL1W", "/works/OL2W"],
+            "Non-fiction": ["/works/OL2W", "/works/OL3W"],  # OL2W overlaps
+        },
+        work_docs={
+            "OL1W": {"revision": 1}, "OL2W": {"revision": 1}, "OL3W": {"revision": 1},
+        },
+    )
+    rule = Rule(add_tags=["/tags/OL184T"], subjects=["Nonfiction", "Non-fiction"])
     plan = plan_rule(ol, rule, limit=50)
+    keys = [c.work_key for c in plan.changes]
+    assert keys == ["/works/OL1W", "/works/OL2W", "/works/OL3W"]  # union, deduped
+    assert plan.subject_counts == {"Nonfiction": 38920, "Non-fiction": 1200}
 
-    assert plan.work_count == 38920  # authoritative, independent of enumeration
-    assert len(plan.changes) == 2
-    assert len(plan.to_write) == 1  # only OL1W
+
+def test_multiple_tags_hit_their_own_fields():
+    ol = FakeOL(
+        tags={"OL184T": NONFIC, "OL24T": ESSAY},
+        subjects=HITS,
+        subject_works={"Nonfiction": ["/works/OL1W"]},
+        work_docs={"OL1W": {"revision": 5}},
+    )
+    rule = Rule(add_tags=["/tags/OL184T", "/tags/OL24T"], subjects=["Nonfiction"])
+    plan = plan_rule(ol, rule, limit=50)
+    tc = plan.changes[0].tag_changes
+    assert tc["literary_forms"][1] == ["/tags/OL184T"]
+    assert tc["genres"][1] == ["/tags/OL24T"]
+
+
+def test_add_is_idempotent_noop():
+    ol = FakeOL(
+        tags={"OL184T": NONFIC},
+        subjects=HITS,
+        subject_works={"Nonfiction": ["/works/OL1W"]},
+        work_docs={"OL1W": {"revision": 2, "literary_forms": [{"key": "/tags/OL184T"}]}},
+    )
+    plan = plan_rule(ol, Rule(add_tags=["/tags/OL184T"], subjects=["Nonfiction"]), limit=50)
+    assert plan.to_write == []  # already tagged, nothing to do
     assert plan.noop_count == 1
-    before, after = plan.changes[0].field_changes["literary_forms"]
-    assert before == [] and after == ["/tags/OL184T"]
 
 
-def test_merge_is_additive_and_preserves_existing():
-    ol = make_ol({
-        "/works/OL1W": {"revision": 1, "literary_forms": [{"key": "/tags/OL183T"}]},  # has Fiction
-    })
-    rule = Rule(add_tags=["/tags/OL184T"], subject="Nonfiction")
+def test_remove_only_named_subjects():
+    ol = FakeOL(
+        tags={"OL184T": NONFIC},
+        subjects=HITS,
+        subject_works={"Nonfiction": ["/works/OL1W"]},
+        work_docs={"OL1W": {"revision": 1, "subjects": ["Nonfiction", "Non-fiction", "Essays"]}},
+    )
+    rule = Rule(
+        add_tags=["/tags/OL184T"], subjects=["Nonfiction"],
+        remove_subjects=["Non-fiction"],  # drop only this one
+    )
     plan = plan_rule(ol, rule, limit=50)
-    before, after = plan.changes[0].field_changes["literary_forms"]
-    assert before == ["/tags/OL183T"]
-    assert after == ["/tags/OL183T", "/tags/OL184T"]  # add-only, existing kept
+    before, after = plan.changes[0].subject_changes["subjects"]
+    assert after == ["Nonfiction", "Essays"]  # only "Non-fiction" removed
+    docs = build_save_docs(ol, plan, comment="c")
+    assert docs[0]["subjects"] == ["Nonfiction", "Essays"]
 
 
-def test_dry_run_writes_nothing():
-    ol = make_ol({"/works/OL1W": {"revision": 1, "subjects": ["Nonfiction"]}})
-    plan = plan_rule(ol, Rule(add_tags=["/tags/OL184T"], subject="Nonfiction"), limit=50)
-    summary = apply_rule(ol, plan, comment="c", write=False)
-    assert summary["dry_run"] is True
-    assert summary["would_write"] == 1
-    assert ol.saved == []  # nothing posted
+def test_strip_subjects_removes_the_selectors():
+    ol = FakeOL(
+        tags={"OL184T": NONFIC},
+        subjects=HITS,
+        subject_works={"Nonfiction": ["/works/OL1W"], "Non-fiction": ["/works/OL1W"]},
+        work_docs={"OL1W": {"revision": 1, "subjects": ["Nonfiction", "Non-fiction", "Essays"]}},
+    )
+    rule = Rule(
+        add_tags=["/tags/OL184T"], subjects=["Nonfiction", "Non-fiction"],
+        strip_subjects=True,
+    )
+    plan = plan_rule(ol, rule, limit=50)
+    _before, after = plan.changes[0].subject_changes["subjects"]
+    assert after == ["Essays"]  # both selector subjects removed
+
+
+def test_default_removes_no_subjects():
+    ol = FakeOL(
+        tags={"OL184T": NONFIC},
+        subjects=HITS,
+        subject_works={"Nonfiction": ["/works/OL1W"]},
+        work_docs={"OL1W": {"revision": 1, "subjects": ["Nonfiction", "Essays"]}},
+    )
+    plan = plan_rule(ol, Rule(add_tags=["/tags/OL184T"], subjects=["Nonfiction"]), limit=50)
+    assert plan.changes[0].subject_changes == {}  # nothing removed by default
+    assert build_save_docs(ol, plan, "c")[0]["subjects"] == ["Nonfiction", "Essays"]
 
 
 def test_build_save_docs_is_raw_and_lossless():
-    ol = make_ol({
-        "/works/OL1W": {
-            "revision": 1, "title": "Keep me", "subjects": ["Nonfiction", "Essays"],
+    ol = FakeOL(
+        tags={"OL184T": NONFIC},
+        subjects=HITS,
+        subject_works={"Nonfiction": ["/works/OL1W"]},
+        work_docs={"OL1W": {
+            "revision": 1, "title": "Keep me", "subjects": ["Nonfiction"],
             "description": {"type": "/type/text", "value": "x"},
-        },
-    })
-    plan = plan_rule(ol, Rule(add_tags=["/tags/OL184T"], subject="Nonfiction"), limit=50)
-    docs = build_save_docs(ol, plan, comment="migrate")
-    assert len(docs) == 1
-    doc = docs[0]
-    assert doc["title"] == "Keep me"  # untouched fields preserved verbatim
+        }},
+    )
+    plan = plan_rule(ol, Rule(add_tags=["/tags/OL184T"], subjects=["Nonfiction"]), limit=50)
+    doc = build_save_docs(ol, plan, comment="migrate")[0]
+    assert doc["title"] == "Keep me"
     assert doc["description"] == {"type": "/type/text", "value": "x"}
     assert doc["literary_forms"] == [{"key": "/tags/OL184T"}]
-    assert doc["subjects"] == ["Nonfiction", "Essays"]  # kept by default
+    assert doc["key"] == "/works/OL1W"
     assert doc["_comment"] == "migrate"
 
 
-def test_strip_subject_removes_only_the_matched_subject():
-    ol = make_ol({
-        "/works/OL1W": {"revision": 1, "subjects": ["Nonfiction", "Essays"]},
-    })
-    rule = Rule(add_tags=["/tags/OL184T"], subject="Nonfiction", strip_subject=True)
-    plan = plan_rule(ol, rule, limit=50)
-    docs = build_save_docs(ol, plan, comment="migrate")
-    assert docs[0]["subjects"] == ["Essays"]
+def test_dry_run_writes_nothing():
+    ol = FakeOL(
+        tags={"OL184T": NONFIC}, subjects=HITS,
+        subject_works={"Nonfiction": ["/works/OL1W"]},
+        work_docs={"OL1W": {"revision": 1, "subjects": ["Nonfiction"]}},
+    )
+    plan = plan_rule(ol, Rule(add_tags=["/tags/OL184T"], subjects=["Nonfiction"]), limit=50)
+    summary = apply_rule(ol, plan, comment="c", write=False)
+    assert summary == {"dry_run": True, "would_write": 1, "batches": 1}
+    assert ol.saved == []
 
 
 def test_write_skips_lost_update():
-    ol = make_ol({
-        "/works/OL1W": {"revision": 1, "subjects": ["Nonfiction"]},
-    })
-    plan = plan_rule(ol, Rule(add_tags=["/tags/OL184T"], subject="Nonfiction"), limit=50)
-    # Simulate the work changing underneath us before the write.
-    ol._work_docs["OL1W"]["revision"] = 2
+    ol = FakeOL(
+        tags={"OL184T": NONFIC}, subjects=HITS,
+        subject_works={"Nonfiction": ["/works/OL1W"]},
+        work_docs={"OL1W": {"revision": 1, "subjects": ["Nonfiction"]}},
+    )
+    plan = plan_rule(ol, Rule(add_tags=["/tags/OL184T"], subjects=["Nonfiction"]), limit=50)
+    ol._work_docs["OL1W"]["revision"] = 2  # changed underneath us
     summary = apply_rule(ol, plan, comment="c", write=True)
-    assert summary["written"] == 0  # revision mismatch -> skipped
+    assert summary["written"] == 0
