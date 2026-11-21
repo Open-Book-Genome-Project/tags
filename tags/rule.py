@@ -1,29 +1,32 @@
 """
 rule.py
 
-A **rule** pairs a *selector* (which works) with a *change* (what to do to them),
-and applies it to every work the selector matches. Unlike a one-off script, a rule
-is declarative and re-runnable: applying it twice converges to the same state (the
-second run is a no-op), because adds are a de-duplicated merge and removes are a
-set difference.
+A **rule** pairs a *selector* (which works) with a *change* (what to do to them).
+It is declarative and re-runnable: applying it twice converges to the same state,
+because adds are a de-duplicated merge and removes are a set difference.
 
-A rule can:
-  * select by **one or more subjects** (the union of works carrying any of them),
-  * **add one or more Tags** -- each routed to the right work field by its tag_type
-    (``genre`` -> ``genres``, ``literary_form`` -> ``literary_forms`` ...), so a
-    single rule can apply a mix of Tag types in one pass, and
-  * **remove zero or more subjects** from those works (default: remove nothing;
-    ``--strip-subjects`` is shorthand for "remove the selector subjects").
+A rule is a small YAML document -- saveable, reviewable, checked in, and (later)
+run by the import pipeline to remediate records as they arrive:
 
-Example:
-    select works carrying subject "Nonfiction" OR "Non-fiction"
-      -> add Tag /tags/OL184T (literary_form) and /tags/OL24T (a genre)
-         -> remove the subjects "Non-fiction"
+    rule: fiction-fantasy
+    subject_type: subject            # optional, default "subject"
+    subjects:
+      - ["Fiction - Fantasy", 0]     # 1 = keep the subject, 0 = remove it
+      - ["Fantasy fiction", 1]       # selects on it, leaves it in place
+    tags:
+      - literary_form:fiction        # <tag_type>:<slug>, or a /tags/OL..T key
+      - genre:fantasy
+
+Semantics:
+  * **select** the works carrying ANY of the listed subjects (the union),
+  * **add** every listed Tag -- each routed to the right work field by its tag_type
+    (``genre`` -> ``genres``, ``literary_form`` -> ``literary_forms`` ...), and
+  * **remove** the subjects flagged 0; leave the subjects flagged 1.
 
 Everything is driven through an injected ``ol`` (an olclient ``OpenLibrary``), so
 the engine unit-tests against a fake client with no network. The read/preview path
-hits only public endpoints; the write path (:func:`apply_rule`) requires auth and
-is dry-run by default.
+hits only public endpoints; writing (:func:`apply_rule`) requires auth, asserts the
+bot identity, and is dry-run-able.
 """
 
 from __future__ import annotations
@@ -31,12 +34,13 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass, field as dc_field
+from pathlib import Path
 from urllib.parse import unquote
 
 SAVE_MANY_PATH = "/api/save_many"
 
-# A Tag's singular ``tag_type`` -> the plural work field it belongs in. Mirrors
-# (inverted) olclient's ``FIELD_TAG_TYPES``; an unmapped tag_type is an error.
+# A Tag's singular ``tag_type`` -> the plural work field it belongs in. An unmapped
+# tag_type is an error (never a guessed field).
 TAG_TYPE_TO_FIELD = {
     "genre": "genres",
     "subgenre": "subgenres",
@@ -57,30 +61,78 @@ SUBJECT_TYPE_FIELD = {
 
 
 @dataclass
-class Rule:
-    """A selector paired with a change."""
+class SubjectSel:
+    """One selector subject plus whether it survives: keep (True) or remove (False)."""
 
-    add_tags: list[str]  # Tag keys, e.g. ['/tags/OL184T']
-    subjects: list[str]  # one or more selector subjects (works matching ANY)
+    name: str
+    keep: bool = True
+
+
+@dataclass
+class Rule:
+    add_tags: list[str]  # resolved Tag keys, e.g. ['/tags/OL183T']
+    subjects: list  # SubjectSel | str | (str, 0|1); normalised in __post_init__
+    name: str | None = None
     subject_type: str = "subject"
-    remove_subjects: list[str] = dc_field(default_factory=list)  # subjects to drop
-    strip_subjects: bool = False  # shorthand: also remove the selector subjects
+
+    def __post_init__(self):
+        norm = []
+        for item in self.subjects:
+            if isinstance(item, SubjectSel):
+                norm.append(item)
+            elif isinstance(item, (list, tuple)):
+                norm.append(SubjectSel(str(item[0]), keep=bool(int(item[1]))))
+            else:
+                norm.append(SubjectSel(str(item), keep=True))
+        self.subjects = norm
+
+    @property
+    def selector_strings(self) -> list[str]:
+        return [s.name for s in self.subjects]
 
     def subjects_to_remove(self) -> set[str]:
-        drop = set(self.remove_subjects)
-        if self.strip_subjects:
-            drop |= set(self.subjects)
-        return drop
+        return {s.name for s in self.subjects if not s.keep}
+
+
+def resolve_tag_ref(ref: str, slug_to_tag_key) -> str:
+    """Resolve a ``<tag_type>:<slug>`` ref (or a ``/tags/OL..T`` key) to a Tag key.
+
+    ``slug_to_tag_key(vocab_dir, slug)`` looks a slug up in a vocabulary. The vocab
+    directory name is tried as the tag_type and as its plural, so both the singular
+    ``literary_form`` and the plural ``genres`` vocab dirs resolve.
+    """
+    ref = ref.strip()
+    if ref.startswith("/tags/"):
+        return ref
+    if ":" in ref:
+        tag_type, slug = ref.split(":", 1)
+    elif "/" in ref:  # tolerate the older type/slug form
+        tag_type, slug = ref.split("/", 1)
+    else:
+        raise ValueError(f"tag ref {ref!r} must be <tag_type>:<slug> or /tags/OL..T")
+    for vocab_dir in (tag_type, tag_type + "s"):
+        key = slug_to_tag_key(vocab_dir, slug)
+        if key:
+            return key
+    raise ValueError(f"no Tag found for {ref!r}")
+
+
+def load_rule(path: str, slug_to_tag_key) -> Rule:
+    """Load a rule from a YAML file, resolving its tag refs to Tag keys."""
+    import yaml
+
+    data = yaml.safe_load(Path(path).read_text()) or {}
+    tags = [resolve_tag_ref(str(t), slug_to_tag_key) for t in data.get("tags", [])]
+    return Rule(
+        add_tags=tags,
+        subjects=data.get("subjects", []),
+        name=data.get("rule") or data.get("name"),
+        subject_type=data.get("subject_type", "subject"),
+    )
 
 
 @dataclass
 class WorkChange:
-    """What a rule would do to one work.
-
-    ``tag_changes``: field -> (before_keys, after_keys) for Tag-ref fields.
-    ``subject_changes``: field -> (before_strings, after_strings) for subject fields.
-    """
-
     work_key: str
     revision: int | None
     tag_changes: dict[str, tuple[list[str], list[str]]] = dc_field(default_factory=dict)
@@ -95,10 +147,10 @@ class WorkChange:
 @dataclass
 class RulePlan:
     rule: Rule
-    tag_field: dict[str, str]  # tag_key -> work field
-    tag_type: dict[str, str]  # tag_key -> tag_type
-    tag_name: dict[str, str]  # tag_key -> display name
-    subject_counts: dict[str, int | None]  # subject -> authoritative work count
+    tag_field: dict[str, str]
+    tag_type: dict[str, str]
+    tag_name: dict[str, str]
+    subject_counts: dict[str, int | None]
     changes: list[WorkChange] = dc_field(default_factory=list)
 
     @property
@@ -115,11 +167,7 @@ def _olid(work_key: str) -> str:
 
 
 def logged_in_user(ol) -> str | None:
-    """The /people/<name> the session is authenticated as, or None.
-
-    OL's ``session`` cookie begins with the logged-in user key, e.g.
-    "/people/foo,2026-...,<hash>".
-    """
+    """The /people/<name> the session is authenticated as, or None."""
     try:
         raw = ol.session.cookies.get("session")
     except Exception:
@@ -132,11 +180,7 @@ def logged_in_user(ol) -> str | None:
 
 
 def assert_identity(ol, expected_account: str) -> str:
-    """Abort before any write unless the session really is ``expected_account``.
-
-    This guarantees a run can only ever write as the intended bot, never as
-    whatever happens to be in ~/.config/ol.ini.
-    """
+    """Abort before any write unless the session really is ``expected_account``."""
     expected = expected_account if expected_account.startswith("/people/") else f"/people/{expected_account}"
     who = logged_in_user(ol)
     if who is None or who.lower() != expected.lower():
@@ -146,28 +190,8 @@ def assert_identity(ol, expected_account: str) -> str:
     return who
 
 
-def save_many_request(ol, docs, comment):
-    """The exact /api/save_many request a write would send, as an inspectable dict.
-
-    Mirrors the battle-tested ``save_many_dicts`` helper: raw dicts, POSTed to
-    /api/save_many with the Opt/42-comment headers. Nothing is sent.
-    """
-    return {
-        "method": "POST",
-        "url": ol.base_url + SAVE_MANY_PATH,
-        "headers": {
-            "Opt": '"http://openlibrary.org/dev/docs/api"; ns=42',
-            "42-comment": comment,
-        },
-        "body": docs,
-    }
-
-
 def resolve_tags(ol, tag_keys):
-    """Resolve each Tag key to its (field, tag_type, name) by reading the Tag.
-
-    Raises ValueError on a missing Tag or a tag_type with no known work field.
-    """
+    """Resolve each Tag key to its (field, tag_type, name) by reading the Tag."""
     tag_field, tag_type, tag_name = {}, {}, {}
     for key in tag_keys:
         tag = ol.Tag.get(_olid(key))
@@ -188,15 +212,14 @@ def resolve_tags(ol, tag_keys):
 
 
 def _merge_keys(existing, add_keys):
-    """Add-only, order-preserving, de-duplicated merge of Tag refs for one field."""
     current = [e["key"] if isinstance(e, dict) else e for e in (existing or [])]
     return list(dict.fromkeys(current + list(add_keys)))
 
 
 def _select_work_keys(ol, rule: Rule, limit):
-    """Union of works carrying ANY of the rule's subjects, de-duped, capped at limit."""
+    """Union of works carrying ANY selector subject, de-duped, capped at limit."""
     seen = {}
-    for subject in rule.subjects:
+    for subject in rule.selector_strings:
         for key in ol.works_by_subject(subject, subject_type=rule.subject_type, limit=limit):
             if key not in seen:
                 seen[key] = True
@@ -209,11 +232,10 @@ def plan_rule(ol, rule: Rule, limit=50):
     """Compute (read-only) what ``rule`` would change, over up to ``limit`` works."""
     tag_field, tag_type, tag_name = resolve_tags(ol, rule.add_tags)
 
-    # Authoritative per-subject totals (independent of the enumeration cap).
     subject_counts: dict[str, int | None] = {}
-    for subject in rule.subjects:
+    for subject in rule.selector_strings:
         count = None
-        for hit in ol.search_subjects(subject, limit=5, subject_type=rule.subject_type):
+        for hit in ol.search_subjects(subject, limit=25, subject_type=rule.subject_type):
             if hit.get("name", "").lower() == subject.lower():
                 count = hit.get("work_count")
                 break
@@ -260,27 +282,25 @@ def plan_rule(ol, rule: Rule, limit=50):
 
 def format_plan(plan: RulePlan, limit: int) -> str:
     r = plan.rule
-    lines = ["RULE", "  select: works with any of these subjects:"]
-    for subject in r.subjects:
-        count = plan.subject_counts.get(subject)
+    lines = [f"RULE{(' ' + r.name) if r.name else ''}", "  select works with any of these subjects:"]
+    for s in r.subjects:
+        count = plan.subject_counts.get(s.name)
         shown = f"{count:,}" if isinstance(count, int) else "?"
-        lines.append(f"    - {subject!r}  ({shown} works)")
+        flag = "keep" if s.keep else "REMOVE"
+        lines.append(f"    - {s.name!r}  [{flag}]  ({shown} works)")
     lines.append(f"    (subject_type: {r.subject_type})")
     lines.append("  add tags:")
     for key in r.add_tags:
         lines.append(
             f"    {plan.tag_name[key]} ({plan.tag_type[key]})  {key}  -> field '{plan.tag_field[key]}'"
         )
-    drop = sorted(r.subjects_to_remove())
-    lines.append(f"  remove subjects: {', '.join(repr(s) for s in drop) if drop else '(none)'}")
     lines.append("")
-
     enumerated = len(plan.changes)
     capped = "  (capped by --limit)" if enumerated >= limit else ""
     lines.append(f"Unique works examined this run: {enumerated:,}{capped}")
     lines.append(f"  would change: {len(plan.to_write):,}   already satisfied (no-op): {plan.noop_count:,}")
     lines.append("")
-    lines.append("SAMPLE CHANGES (dry run — nothing written):")
+    lines.append("SAMPLE CHANGES:")
     for c in plan.to_write[:10]:
         parts = []
         for field, (before, after) in c.tag_changes.items():
@@ -298,26 +318,34 @@ def format_plan(plan: RulePlan, limit: int) -> str:
 
 
 def build_save_docs(ol, plan: RulePlan, comment: str):
-    """Build the raw work dicts a write would POST to /api/save_many.
-
-    Raw-dict path (not an entity round-trip): fetch each work's full dict, set only
-    the changed fields, keep everything else verbatim. Lossless. Does not write.
-    """
+    """Build the raw work dicts a write would POST to /api/save_many (lossless)."""
     docs = []
     for c in plan.to_write:
         data = ol.get_ol_response(f"/works/{_olid(c.work_key)}.json").json()
-        data["key"] = c.work_key  # save_many keys each doc by its work key
+        data["key"] = c.work_key
         for field, (_before, after) in c.tag_changes.items():
             data[field] = [{"key": k} for k in after]
         for field, (_before, after) in c.subject_changes.items():
-            data[field] = list(after)  # subject fields are plain strings
+            data[field] = list(after)
         data["_comment"] = comment
         docs.append(data)
     return docs
 
 
+def save_many_request(ol, docs, comment):
+    """The exact /api/save_many request a write would send (inspectable; sends nothing)."""
+    return {
+        "method": "POST",
+        "url": ol.base_url + SAVE_MANY_PATH,
+        "headers": {
+            "Opt": '"http://openlibrary.org/dev/docs/api"; ns=42',
+            "42-comment": comment,
+        },
+        "body": docs,
+    }
+
+
 def _audit_rows(plan: RulePlan, comment: str):
-    """One reversible record per work: its revision and every field's before/after."""
     rows = {}
     for c in plan.to_write:
         changes = {}
@@ -331,19 +359,18 @@ def _audit_rows(plan: RulePlan, comment: str):
     return rows
 
 
-def apply_rule(ol, plan: RulePlan, comment: str, batch_size=250, write=False,
+def apply_rule(ol, plan: RulePlan, comment: str, batch_size=250, dry_run=True,
                audit=None, expected_account=None):
-    """Apply a plan. DRY RUN unless ``write=True``. Returns a summary dict.
+    """Apply a plan. DRY RUN unless ``dry_run=False``. Returns a summary dict.
 
     Safety: refuses to write unless the session is ``expected_account`` (when given);
     re-fetches and compares each work's revision immediately before saving (lost-update
     guard); writes in batches of ``batch_size`` via /api/save_many; writes a reversible
     audit record (base revision + per-field before/after) before each batch when
-    ``audit`` (a file path) is given, so a crash never loses its place and a rerun stays
-    idempotent.
+    ``audit`` (a file path) is given.
     """
     docs = build_save_docs(ol, plan, comment)
-    if not write:
+    if dry_run:
         return {
             "dry_run": True,
             "would_write": len(docs),
@@ -363,7 +390,7 @@ def apply_rule(ol, plan: RulePlan, comment: str, batch_size=250, write=False,
             live = ol.get_ol_response(f"{key}.json").json()
             planned = next((c for c in plan.to_write if c.work_key == key), None)
             if planned is not None and live.get("revision") != planned.revision:
-                continue  # changed underneath us; skip and let a rerun reconcile
+                continue
             safe.append(doc)
         if audit:
             with open(audit, "a", encoding="utf-8") as fh:

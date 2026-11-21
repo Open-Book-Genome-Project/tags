@@ -1,8 +1,9 @@
 """Tests for the rule engine (tags/rule.py), driven through a fake olclient.
 
-No network and no credentials. Covers tag->field routing, multiple subjects (union),
-multiple tags (mixed fields), add-only idempotent merge, explicit subject removal,
-the authoritative counts, no-op detection, dry-run safety, and the raw-dict save docs.
+No network and no credentials. Covers tag ref resolution (<tag_type>:<slug>), YAML
+rule loading with per-subject keep/remove flags, multiple subjects (union), multiple
+tags (mixed fields), add-only idempotent merge, subject removal, the authoritative
+counts, no-op detection, dry-run safety, the identity guard, and the raw-dict save docs.
 """
 
 import json
@@ -13,10 +14,11 @@ import pytest
 from tags.rule import (
     Rule,
     apply_rule,
-    assert_identity,
     build_save_docs,
+    load_rule,
     logged_in_user,
     plan_rule,
+    resolve_tag_ref,
     resolve_tags,
     save_many_request,
 )
@@ -41,9 +43,9 @@ class FakeTagAPI:
 class FakeOL:
     def __init__(self, tags=None, subjects=None, subject_works=None, work_docs=None, user=None):
         self.Tag = FakeTagAPI(tags or {})
-        self._subjects = subjects or []  # list of subject-hit dicts
-        self._subject_works = subject_works or {}  # subject string -> [work keys]
-        self._work_docs = work_docs or {}  # olid -> work dict
+        self._subjects = subjects or []
+        self._subject_works = subject_works or {}
+        self._work_docs = work_docs or {}
         self.base_url = "https://openlibrary.org"
         self.saved = []
         cookies = types.SimpleNamespace(get=lambda name: user)
@@ -70,19 +72,74 @@ def tag(tag_type, name):
 
 
 NONFIC = tag("literary_form", "Nonfiction")
-ESSAY = tag("genre", "Essays")
+FICTION = tag("literary_form", "Fiction")
+FANTASY = tag("genre", "Fantasy")
 
 HITS = [
     {"name": "Nonfiction", "subject_type": "subject", "work_count": 38920},
     {"name": "Non-fiction", "subject_type": "subject", "work_count": 1200},
+    {"name": "Fiction - Fantasy", "subject_type": "subject", "work_count": 534},
 ]
 
 
+# A slug_to_tag_key stand-in: (vocab_dir, slug) -> key.
+FAKE_VOCAB = {
+    ("literary_form", "fiction"): "/tags/OL183T",
+    ("genres", "fantasy"): "/tags/OL169T",
+}
+
+
+def fake_slug_to_tag_key(vocab_dir, slug):
+    return FAKE_VOCAB.get((vocab_dir, slug))
+
+
+# --- tag ref resolution -----------------------------------------------------
+
+
+def test_resolve_tag_ref_colon_form_singular_and_plural_dirs():
+    # literary_form resolves from the singular dir; genre from the plural dir.
+    assert resolve_tag_ref("literary_form:fiction", fake_slug_to_tag_key) == "/tags/OL183T"
+    assert resolve_tag_ref("genre:fantasy", fake_slug_to_tag_key) == "/tags/OL169T"
+
+
+def test_resolve_tag_ref_passes_through_key():
+    assert resolve_tag_ref("/tags/OL184T", fake_slug_to_tag_key) == "/tags/OL184T"
+
+
+def test_resolve_tag_ref_unknown_raises():
+    with pytest.raises(ValueError, match="no Tag found"):
+        resolve_tag_ref("genre:nope", fake_slug_to_tag_key)
+
+
+# --- YAML loading -----------------------------------------------------------
+
+
+def test_load_rule_parses_keep_remove_and_tags(tmp_path):
+    p = tmp_path / "r.yml"
+    p.write_text(
+        "rule: fiction-fantasy\n"
+        "subjects:\n"
+        "  - ['Fiction - Fantasy', 0]\n"
+        "  - ['Fantasy fiction', 1]\n"
+        "tags:\n"
+        "  - literary_form:fiction\n"
+        "  - genre:fantasy\n"
+    )
+    rule = load_rule(str(p), fake_slug_to_tag_key)
+    assert rule.name == "fiction-fantasy"
+    assert rule.add_tags == ["/tags/OL183T", "/tags/OL169T"]
+    assert rule.selector_strings == ["Fiction - Fantasy", "Fantasy fiction"]
+    assert rule.subjects_to_remove() == {"Fiction - Fantasy"}  # only the 0-flagged one
+
+
+# --- tag -> field routing ---------------------------------------------------
+
+
 def test_resolve_tags_routes_by_tag_type():
-    ol = FakeOL(tags={"OL184T": NONFIC, "OL24T": ESSAY})
-    field, ttype, name = resolve_tags(ol, ["/tags/OL184T", "/tags/OL24T"])
-    assert field["/tags/OL184T"] == "literary_forms"
-    assert field["/tags/OL24T"] == "genres"  # different field, same rule
+    ol = FakeOL(tags={"OL183T": FICTION, "OL169T": FANTASY})
+    field, ttype, name = resolve_tags(ol, ["/tags/OL183T", "/tags/OL169T"])
+    assert field["/tags/OL183T"] == "literary_forms"
+    assert field["/tags/OL169T"] == "genres"
 
 
 def test_resolve_tags_unknown_type_raises():
@@ -91,101 +148,80 @@ def test_resolve_tags_unknown_type_raises():
         resolve_tags(ol, ["/tags/OL9T"])
 
 
+# --- planning ---------------------------------------------------------------
+
+
 def test_multiple_subjects_union_and_dedup():
     ol = FakeOL(
         tags={"OL184T": NONFIC},
         subjects=HITS,
         subject_works={
             "Nonfiction": ["/works/OL1W", "/works/OL2W"],
-            "Non-fiction": ["/works/OL2W", "/works/OL3W"],  # OL2W overlaps
+            "Non-fiction": ["/works/OL2W", "/works/OL3W"],
         },
-        work_docs={
-            "OL1W": {"revision": 1}, "OL2W": {"revision": 1}, "OL3W": {"revision": 1},
-        },
+        work_docs={"OL1W": {"revision": 1}, "OL2W": {"revision": 1}, "OL3W": {"revision": 1}},
     )
     rule = Rule(add_tags=["/tags/OL184T"], subjects=["Nonfiction", "Non-fiction"])
     plan = plan_rule(ol, rule, limit=50)
-    keys = [c.work_key for c in plan.changes]
-    assert keys == ["/works/OL1W", "/works/OL2W", "/works/OL3W"]  # union, deduped
+    assert [c.work_key for c in plan.changes] == ["/works/OL1W", "/works/OL2W", "/works/OL3W"]
     assert plan.subject_counts == {"Nonfiction": 38920, "Non-fiction": 1200}
 
 
 def test_multiple_tags_hit_their_own_fields():
     ol = FakeOL(
-        tags={"OL184T": NONFIC, "OL24T": ESSAY},
+        tags={"OL183T": FICTION, "OL169T": FANTASY},
         subjects=HITS,
-        subject_works={"Nonfiction": ["/works/OL1W"]},
+        subject_works={"Fiction - Fantasy": ["/works/OL1W"]},
         work_docs={"OL1W": {"revision": 5}},
     )
-    rule = Rule(add_tags=["/tags/OL184T", "/tags/OL24T"], subjects=["Nonfiction"])
+    rule = Rule(add_tags=["/tags/OL183T", "/tags/OL169T"], subjects=[("Fiction - Fantasy", 0)])
     plan = plan_rule(ol, rule, limit=50)
     tc = plan.changes[0].tag_changes
-    assert tc["literary_forms"][1] == ["/tags/OL184T"]
-    assert tc["genres"][1] == ["/tags/OL24T"]
+    assert tc["literary_forms"][1] == ["/tags/OL183T"]
+    assert tc["genres"][1] == ["/tags/OL169T"]
 
 
 def test_add_is_idempotent_noop():
     ol = FakeOL(
-        tags={"OL184T": NONFIC},
-        subjects=HITS,
+        tags={"OL184T": NONFIC}, subjects=HITS,
         subject_works={"Nonfiction": ["/works/OL1W"]},
         work_docs={"OL1W": {"revision": 2, "literary_forms": [{"key": "/tags/OL184T"}]}},
     )
     plan = plan_rule(ol, Rule(add_tags=["/tags/OL184T"], subjects=["Nonfiction"]), limit=50)
-    assert plan.to_write == []  # already tagged, nothing to do
+    assert plan.to_write == []
     assert plan.noop_count == 1
 
 
-def test_remove_only_named_subjects():
+def test_keep_flag_1_removes_nothing():
     ol = FakeOL(
-        tags={"OL184T": NONFIC},
-        subjects=HITS,
-        subject_works={"Nonfiction": ["/works/OL1W"]},
-        work_docs={"OL1W": {"revision": 1, "subjects": ["Nonfiction", "Non-fiction", "Essays"]}},
-    )
-    rule = Rule(
-        add_tags=["/tags/OL184T"], subjects=["Nonfiction"],
-        remove_subjects=["Non-fiction"],  # drop only this one
-    )
-    plan = plan_rule(ol, rule, limit=50)
-    before, after = plan.changes[0].subject_changes["subjects"]
-    assert after == ["Nonfiction", "Essays"]  # only "Non-fiction" removed
-    docs = build_save_docs(ol, plan, comment="c")
-    assert docs[0]["subjects"] == ["Nonfiction", "Essays"]
-
-
-def test_strip_subjects_removes_the_selectors():
-    ol = FakeOL(
-        tags={"OL184T": NONFIC},
-        subjects=HITS,
-        subject_works={"Nonfiction": ["/works/OL1W"], "Non-fiction": ["/works/OL1W"]},
-        work_docs={"OL1W": {"revision": 1, "subjects": ["Nonfiction", "Non-fiction", "Essays"]}},
-    )
-    rule = Rule(
-        add_tags=["/tags/OL184T"], subjects=["Nonfiction", "Non-fiction"],
-        strip_subjects=True,
-    )
-    plan = plan_rule(ol, rule, limit=50)
-    _before, after = plan.changes[0].subject_changes["subjects"]
-    assert after == ["Essays"]  # both selector subjects removed
-
-
-def test_default_removes_no_subjects():
-    ol = FakeOL(
-        tags={"OL184T": NONFIC},
-        subjects=HITS,
+        tags={"OL184T": NONFIC}, subjects=HITS,
         subject_works={"Nonfiction": ["/works/OL1W"]},
         work_docs={"OL1W": {"revision": 1, "subjects": ["Nonfiction", "Essays"]}},
     )
-    plan = plan_rule(ol, Rule(add_tags=["/tags/OL184T"], subjects=["Nonfiction"]), limit=50)
-    assert plan.changes[0].subject_changes == {}  # nothing removed by default
+    rule = Rule(add_tags=["/tags/OL184T"], subjects=[("Nonfiction", 1)])  # keep
+    plan = plan_rule(ol, rule, limit=50)
+    assert plan.changes[0].subject_changes == {}
     assert build_save_docs(ol, plan, "c")[0]["subjects"] == ["Nonfiction", "Essays"]
+
+
+def test_flag_0_removes_only_that_subject():
+    ol = FakeOL(
+        tags={"OL184T": NONFIC}, subjects=HITS,
+        subject_works={"Non-fiction": ["/works/OL1W"]},
+        work_docs={"OL1W": {"revision": 1, "subjects": ["Nonfiction", "Non-fiction", "Essays"]}},
+    )
+    rule = Rule(add_tags=["/tags/OL184T"], subjects=[("Non-fiction", 0), ("Nonfiction", 1)])
+    plan = plan_rule(ol, rule, limit=50)
+    _before, after = plan.changes[0].subject_changes["subjects"]
+    assert after == ["Nonfiction", "Essays"]  # only "Non-fiction" removed
+
+
+# --- save docs + writing ----------------------------------------------------
 
 
 def test_build_save_docs_is_raw_and_lossless():
     ol = FakeOL(
-        tags={"OL184T": NONFIC},
-        subjects=HITS,
+        tags={"OL184T": NONFIC}, subjects=HITS,
         subject_works={"Nonfiction": ["/works/OL1W"]},
         work_docs={"OL1W": {
             "revision": 1, "title": "Keep me", "subjects": ["Nonfiction"],
@@ -201,37 +237,29 @@ def test_build_save_docs_is_raw_and_lossless():
     assert doc["_comment"] == "migrate"
 
 
-def test_dry_run_writes_nothing():
-    ol = FakeOL(
-        tags={"OL184T": NONFIC}, subjects=HITS,
-        subject_works={"Nonfiction": ["/works/OL1W"]},
-        work_docs={"OL1W": {"revision": 1, "subjects": ["Nonfiction"]}},
-    )
-    plan = plan_rule(ol, Rule(add_tags=["/tags/OL184T"], subjects=["Nonfiction"]), limit=50)
-    summary = apply_rule(ol, plan, comment="c", write=False)
-    assert summary == {"dry_run": True, "would_write": 1, "batches": 1}
-    assert ol.saved == []
-
-
-def test_write_skips_lost_update():
-    ol = FakeOL(
-        tags={"OL184T": NONFIC}, subjects=HITS,
-        subject_works={"Nonfiction": ["/works/OL1W"]},
-        work_docs={"OL1W": {"revision": 1, "subjects": ["Nonfiction"]}},
-    )
-    plan = plan_rule(ol, Rule(add_tags=["/tags/OL184T"], subjects=["Nonfiction"]), limit=50)
-    ol._work_docs["OL1W"]["revision"] = 2  # changed underneath us
-    summary = apply_rule(ol, plan, comment="c", write=True)
-    assert summary["written"] == 0
-
-
-def _one_work_ol(user):
+def _one_work_ol(user=None):
     return FakeOL(
         tags={"OL184T": NONFIC}, subjects=HITS,
         subject_works={"Nonfiction": ["/works/OL1W"]},
         work_docs={"OL1W": {"revision": 1, "subjects": ["Nonfiction"]}},
         user=user,
     )
+
+
+def test_dry_run_writes_nothing():
+    ol = _one_work_ol()
+    plan = plan_rule(ol, Rule(add_tags=["/tags/OL184T"], subjects=["Nonfiction"]), limit=50)
+    summary = apply_rule(ol, plan, comment="c", dry_run=True)
+    assert summary == {"dry_run": True, "would_write": 1, "batches": 1}
+    assert ol.saved == []
+
+
+def test_write_skips_lost_update():
+    ol = _one_work_ol("/people/openlibrarytagsbot,2026,h")
+    plan = plan_rule(ol, Rule(add_tags=["/tags/OL184T"], subjects=["Nonfiction"]), limit=50)
+    ol._work_docs["OL1W"]["revision"] = 2
+    summary = apply_rule(ol, plan, comment="c", dry_run=False, expected_account="openlibrarytagsbot")
+    assert summary["written"] == 0
 
 
 def test_logged_in_user_parses_session_cookie():
@@ -243,20 +271,20 @@ def test_write_refuses_wrong_identity():
     ol = _one_work_ol("/people/someone_else,2026,hash")
     plan = plan_rule(ol, Rule(add_tags=["/tags/OL184T"], subjects=["Nonfiction"]), limit=50)
     with pytest.raises(SystemExit, match="identity check FAILED"):
-        apply_rule(ol, plan, comment="c", write=True, expected_account="openlibrarytagsbot")
-    assert ol.saved == []  # nothing posted
+        apply_rule(ol, plan, comment="c", dry_run=False, expected_account="openlibrarytagsbot")
+    assert ol.saved == []
 
 
 def test_write_proceeds_for_correct_identity_and_posts_save_many():
     ol = _one_work_ol("/people/openlibrarytagsbot,2026,hash")
     plan = plan_rule(ol, Rule(add_tags=["/tags/OL184T"], subjects=["Nonfiction"]), limit=50)
-    summary = apply_rule(ol, plan, comment="c", write=True, expected_account="openlibrarytagsbot")
+    summary = apply_rule(ol, plan, comment="c", dry_run=False, expected_account="openlibrarytagsbot")
     assert summary["written"] == 1
     assert ol.saved[0][0]["literary_forms"] == [{"key": "/tags/OL184T"}]
 
 
 def test_save_many_request_shape():
-    ol = _one_work_ol("/people/openlibrarytagsbot,2026,hash")
+    ol = _one_work_ol()
     plan = plan_rule(ol, Rule(add_tags=["/tags/OL184T"], subjects=["Nonfiction"]), limit=50)
     docs = build_save_docs(ol, plan, comment="migrate")
     req = save_many_request(ol, docs, comment="migrate")

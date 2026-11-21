@@ -1,0 +1,11 @@
+# A rule: promote the free-text subject "Fiction - Fantasy" onto managed Tags,
+# then drop that subject string. Saveable, reviewable, re-runnable.
+#   subjects: [<string>, <1=keep | 0=remove>]
+rule: fiction-fantasy
+
+subjects:
+  - ["Fiction - Fantasy", 0]     # select on it, and remove it once tagged
+
+tags:
+  - literary_form:fiction
+  - genre:fantasy
