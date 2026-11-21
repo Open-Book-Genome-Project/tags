@@ -196,6 +196,55 @@ def cmd_unmapped(args: argparse.Namespace) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Rule - apply Tags to every work a selector matches (dry-run by default)
+# ---------------------------------------------------------------------------
+
+def cmd_rule_apply(args: argparse.Namespace) -> None:
+    """Apply a rule: select works by subject, add Tag(s), routed by tag_type."""
+    from tags.rule import Rule, apply_rule, format_plan, plan_rule
+    from tags.utils import get_ol_session, slug_to_tag_key
+
+    # Resolve each --add value: a /tags/OL..T key, or a "type/slug" vocabulary ref.
+    tag_keys = []
+    for value in args.add:
+        if value.startswith("/tags/"):
+            tag_keys.append(value)
+        elif "/" in value:
+            type_name, slug = value.split("/", 1)
+            key = slug_to_tag_key(type_name, slug)
+            if not key:
+                raise SystemExit(f"error: no Tag for vocabulary ref {value!r}")
+            tag_keys.append(key)
+        else:
+            raise SystemExit(f"error: --add {value!r} must be /tags/OL..T or <type>/<slug>")
+
+    ol = get_ol_session()
+    rule = Rule(
+        add_tags=tag_keys,
+        subject=args.subject,
+        subject_type=args.type,
+        strip_subject=args.strip_subject,
+    )
+    plan = plan_rule(ol, rule, limit=args.limit)
+    print(format_plan(plan, args.limit))
+    print()
+
+    if not args.write:
+        summary = apply_rule(ol, plan, comment=args.comment, write=False)
+        print(
+            f"DRY RUN: would write {summary['would_write']:,} works "
+            f"in {summary['batches']} batch(es). Re-run with --write to apply."
+        )
+        return
+
+    summary = apply_rule(
+        ol, plan, comment=args.comment, batch_size=args.batch_size,
+        write=True, audit=args.audit,
+    )
+    print(f"WROTE {summary['written']:,} of {summary['planned']:,} planned works.")
+
+
+# ---------------------------------------------------------------------------
 # CLI entry point
 # ---------------------------------------------------------------------------
 
@@ -220,12 +269,32 @@ def main():
     up.add_argument("--top", type=int, default=40, help="Number of top unmapped to show")
     up.add_argument("--progress", type=int, default=None, help="Progress every N works")
 
+    # rule (apply Tags to every work a selector matches; dry-run by default)
+    rp = subparsers.add_parser("rule", help="Apply Tags to works matching a selector")
+    rp_sub = rp.add_subparsers(dest="rule_command", required=True)
+    ra = rp_sub.add_parser("apply", help="Select works by subject and add Tag(s)")
+    ra.add_argument("--subject", required=True, help="Exact subject string to select by")
+    ra.add_argument("--type", default="subject", help="subject/person/place/time")
+    ra.add_argument(
+        "--add", nargs="+", required=True, metavar="TAG",
+        help="Tag(s) to add: /tags/OL..T key(s) or <type>/<slug> vocabulary ref(s)",
+    )
+    ra.add_argument("--limit", type=int, default=50, help="Max works to examine/write")
+    ra.add_argument("--strip-subject", action="store_true", help="Drop the subject string after tagging")
+    ra.add_argument("--batch-size", type=int, default=250, help="Works per save_many batch")
+    ra.add_argument("--comment", default="migrate subject to tag", help="Edit comment")
+    ra.add_argument("--audit", default=None, help="Append-per-batch audit JSONL path")
+    ra.add_argument("--write", action="store_true", help="Actually write (default: dry run)")
+
     args = parser.parse_args()
 
     if args.command == "analyze":
         cmd_analyze(args)
     elif args.command == "unmapped":
         cmd_unmapped(args)
+    elif args.command == "rule":
+        if args.rule_command == "apply":
+            cmd_rule_apply(args)
 
 
 if __name__ == "__main__":
