@@ -29,7 +29,11 @@ is dry-run by default.
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass, field as dc_field
+from urllib.parse import unquote
+
+SAVE_MANY_PATH = "/api/save_many"
 
 # A Tag's singular ``tag_type`` -> the plural work field it belongs in. Mirrors
 # (inverted) olclient's ``FIELD_TAG_TYPES``; an unmapped tag_type is an error.
@@ -108,6 +112,55 @@ class RulePlan:
 
 def _olid(work_key: str) -> str:
     return work_key.rstrip("/").split("/")[-1]
+
+
+def logged_in_user(ol) -> str | None:
+    """The /people/<name> the session is authenticated as, or None.
+
+    OL's ``session`` cookie begins with the logged-in user key, e.g.
+    "/people/foo,2026-...,<hash>".
+    """
+    try:
+        raw = ol.session.cookies.get("session")
+    except Exception:
+        raw = None
+    if raw:
+        m = re.match(r"(/people/[A-Za-z0-9_.\-]+)", unquote(raw).strip().strip('"'))
+        if m:
+            return m.group(1)
+    return None
+
+
+def assert_identity(ol, expected_account: str) -> str:
+    """Abort before any write unless the session really is ``expected_account``.
+
+    This guarantees a run can only ever write as the intended bot, never as
+    whatever happens to be in ~/.config/ol.ini.
+    """
+    expected = expected_account if expected_account.startswith("/people/") else f"/people/{expected_account}"
+    who = logged_in_user(ol)
+    if who is None or who.lower() != expected.lower():
+        raise SystemExit(
+            f"identity check FAILED: session is {who!r}, expected {expected!r} — refusing to write"
+        )
+    return who
+
+
+def save_many_request(ol, docs, comment):
+    """The exact /api/save_many request a write would send, as an inspectable dict.
+
+    Mirrors the battle-tested ``save_many_dicts`` helper: raw dicts, POSTed to
+    /api/save_many with the Opt/42-comment headers. Nothing is sent.
+    """
+    return {
+        "method": "POST",
+        "url": ol.base_url + SAVE_MANY_PATH,
+        "headers": {
+            "Opt": '"http://openlibrary.org/dev/docs/api"; ns=42',
+            "42-comment": comment,
+        },
+        "body": docs,
+    }
 
 
 def resolve_tags(ol, tag_keys):
@@ -263,13 +316,31 @@ def build_save_docs(ol, plan: RulePlan, comment: str):
     return docs
 
 
-def apply_rule(ol, plan: RulePlan, comment: str, batch_size=250, write=False, audit=None):
+def _audit_rows(plan: RulePlan, comment: str):
+    """One reversible record per work: its revision and every field's before/after."""
+    rows = {}
+    for c in plan.to_write:
+        changes = {}
+        for field, (before, after) in {**c.tag_changes, **c.subject_changes}.items():
+            if before != after:
+                changes[field] = {"before": before, "after": after}
+        rows[c.work_key] = {
+            "work": c.work_key, "base_revision": c.revision,
+            "comment": comment, "changes": changes,
+        }
+    return rows
+
+
+def apply_rule(ol, plan: RulePlan, comment: str, batch_size=250, write=False,
+               audit=None, expected_account=None):
     """Apply a plan. DRY RUN unless ``write=True``. Returns a summary dict.
 
-    Safety: re-fetches and compares each work's revision immediately before saving
-    (lost-update guard); writes in batches of ``batch_size`` via /api/save_many;
-    appends an audit record per batch before saving when ``audit`` (a file path) is
-    given, so a crash never loses its place and a rerun stays idempotent.
+    Safety: refuses to write unless the session is ``expected_account`` (when given);
+    re-fetches and compares each work's revision immediately before saving (lost-update
+    guard); writes in batches of ``batch_size`` via /api/save_many; writes a reversible
+    audit record (base revision + per-field before/after) before each batch when
+    ``audit`` (a file path) is given, so a crash never loses its place and a rerun stays
+    idempotent.
     """
     docs = build_save_docs(ol, plan, comment)
     if not write:
@@ -279,6 +350,10 @@ def apply_rule(ol, plan: RulePlan, comment: str, batch_size=250, write=False, au
             "batches": (len(docs) + batch_size - 1) // batch_size if docs else 0,
         }
 
+    if expected_account:
+        assert_identity(ol, expected_account)
+
+    audit_rows = _audit_rows(plan, comment)
     written = 0
     for i in range(0, len(docs), batch_size):
         batch = docs[i : i + batch_size]
@@ -293,11 +368,9 @@ def apply_rule(ol, plan: RulePlan, comment: str, batch_size=250, write=False, au
         if audit:
             with open(audit, "a", encoding="utf-8") as fh:
                 for doc in safe:
-                    fh.write(json.dumps({"key": doc["key"], "comment": comment}) + "\n")
-        ol.session.post(
-            ol.base_url + "/api/save_many",
-            data=json.dumps(safe),
-            headers={"Opt": '"http://openlibrary.org/dev/docs/api"; ns=42', "42-comment": comment},
-        )
+                    fh.write(json.dumps(audit_rows[doc["key"]]) + "\n")
+        req = save_many_request(ol, safe, comment)
+        resp = ol.session.post(req["url"], json.dumps(safe), headers=req["headers"])
+        resp.raise_for_status()
         written += len(safe)
     return {"dry_run": False, "written": written, "planned": len(docs)}

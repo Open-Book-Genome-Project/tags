@@ -13,9 +13,12 @@ import pytest
 from tags.rule import (
     Rule,
     apply_rule,
+    assert_identity,
     build_save_docs,
+    logged_in_user,
     plan_rule,
     resolve_tags,
+    save_many_request,
 )
 
 
@@ -36,14 +39,15 @@ class FakeTagAPI:
 
 
 class FakeOL:
-    def __init__(self, tags=None, subjects=None, subject_works=None, work_docs=None):
+    def __init__(self, tags=None, subjects=None, subject_works=None, work_docs=None, user=None):
         self.Tag = FakeTagAPI(tags or {})
         self._subjects = subjects or []  # list of subject-hit dicts
         self._subject_works = subject_works or {}  # subject string -> [work keys]
         self._work_docs = work_docs or {}  # olid -> work dict
         self.base_url = "https://openlibrary.org"
         self.saved = []
-        self.session = types.SimpleNamespace(post=self._post)
+        cookies = types.SimpleNamespace(get=lambda name: user)
+        self.session = types.SimpleNamespace(post=self._post, cookies=cookies)
 
     def search_subjects(self, q, limit=10, subject_type=None):
         return [h for h in self._subjects if h["name"].lower() == q.lower()]
@@ -58,7 +62,7 @@ class FakeOL:
 
     def _post(self, url, data=None, headers=None):
         self.saved.append(json.loads(data))
-        return FakeResponse({"status": "ok"})
+        return types.SimpleNamespace(status_code=200, raise_for_status=lambda: None)
 
 
 def tag(tag_type, name):
@@ -219,3 +223,43 @@ def test_write_skips_lost_update():
     ol._work_docs["OL1W"]["revision"] = 2  # changed underneath us
     summary = apply_rule(ol, plan, comment="c", write=True)
     assert summary["written"] == 0
+
+
+def _one_work_ol(user):
+    return FakeOL(
+        tags={"OL184T": NONFIC}, subjects=HITS,
+        subject_works={"Nonfiction": ["/works/OL1W"]},
+        work_docs={"OL1W": {"revision": 1, "subjects": ["Nonfiction"]}},
+        user=user,
+    )
+
+
+def test_logged_in_user_parses_session_cookie():
+    ol = _one_work_ol("/people/openlibrarytagsbot,2026-01-01,hash")
+    assert logged_in_user(ol) == "/people/openlibrarytagsbot"
+
+
+def test_write_refuses_wrong_identity():
+    ol = _one_work_ol("/people/someone_else,2026,hash")
+    plan = plan_rule(ol, Rule(add_tags=["/tags/OL184T"], subjects=["Nonfiction"]), limit=50)
+    with pytest.raises(SystemExit, match="identity check FAILED"):
+        apply_rule(ol, plan, comment="c", write=True, expected_account="openlibrarytagsbot")
+    assert ol.saved == []  # nothing posted
+
+
+def test_write_proceeds_for_correct_identity_and_posts_save_many():
+    ol = _one_work_ol("/people/openlibrarytagsbot,2026,hash")
+    plan = plan_rule(ol, Rule(add_tags=["/tags/OL184T"], subjects=["Nonfiction"]), limit=50)
+    summary = apply_rule(ol, plan, comment="c", write=True, expected_account="openlibrarytagsbot")
+    assert summary["written"] == 1
+    assert ol.saved[0][0]["literary_forms"] == [{"key": "/tags/OL184T"}]
+
+
+def test_save_many_request_shape():
+    ol = _one_work_ol("/people/openlibrarytagsbot,2026,hash")
+    plan = plan_rule(ol, Rule(add_tags=["/tags/OL184T"], subjects=["Nonfiction"]), limit=50)
+    docs = build_save_docs(ol, plan, comment="migrate")
+    req = save_many_request(ol, docs, comment="migrate")
+    assert req["url"].endswith("/api/save_many")
+    assert req["headers"]["42-comment"] == "migrate"
+    assert req["body"][0]["key"] == "/works/OL1W"

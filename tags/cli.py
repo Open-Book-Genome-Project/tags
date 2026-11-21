@@ -201,7 +201,12 @@ def cmd_unmapped(args: argparse.Namespace) -> None:
 
 def cmd_rule_apply(args: argparse.Namespace) -> None:
     """Apply a rule: select works by subject, add Tag(s), routed by tag_type."""
-    from tags.rule import Rule, apply_rule, format_plan, plan_rule
+    import json
+
+    from tags.rule import (
+        Rule, apply_rule, build_save_docs, format_plan, logged_in_user,
+        plan_rule, save_many_request,
+    )
     from tags.utils import get_ol_session, slug_to_tag_key
 
     # Resolve each --add value: a /tags/OL..T key, or a "type/slug" vocabulary ref.
@@ -230,19 +235,34 @@ def cmd_rule_apply(args: argparse.Namespace) -> None:
     print(format_plan(plan, args.limit))
     print()
 
+    # --show-payload: print the exact /api/save_many request, write nothing.
+    if args.show_payload:
+        docs = build_save_docs(ol, plan, comment=args.comment)
+        req = save_many_request(ol, docs, comment=args.comment)
+        print(f"POST {req['url']}")
+        for k, v in req["headers"].items():
+            print(f"  {k}: {v}")
+        print(f"  (would write as: {logged_in_user(ol)})")
+        print("\nBODY (" + str(len(docs)) + " work doc(s)):")
+        print(json.dumps(req["body"], indent=2, ensure_ascii=False))
+        return
+
     if not args.write:
         summary = apply_rule(ol, plan, comment=args.comment, write=False)
         print(
             f"DRY RUN: would write {summary['would_write']:,} works "
-            f"in {summary['batches']} batch(es). Re-run with --write to apply."
+            f"in {summary['batches']} batch(es). "
+            f"Add --show-payload to inspect the save_many body, or --write to apply."
         )
         return
 
     summary = apply_rule(
         ol, plan, comment=args.comment, batch_size=args.batch_size,
-        write=True, audit=args.audit,
+        write=True, audit=args.audit, expected_account=args.as_account,
     )
     print(f"WROTE {summary['written']:,} of {summary['planned']:,} planned works.")
+    if args.audit:
+        print(f"Reversible audit log: {args.audit}")
 
 
 # ---------------------------------------------------------------------------
@@ -294,7 +314,10 @@ def main():
     )
     ra.add_argument("--batch-size", type=int, default=250, help="Works per save_many batch")
     ra.add_argument("--comment", default="migrate subject to tag", help="Edit comment")
-    ra.add_argument("--audit", default=None, help="Append-per-batch audit JSONL path")
+    ra.add_argument("--audit", default=None, help="Reversible audit JSONL path (per-field before/after)")
+    ra.add_argument("--show-payload", action="store_true", help="Print the exact /api/save_many request; write nothing")
+    ra.add_argument("--as", dest="as_account", default="openlibrarytagsbot",
+                    help="Refuse to write unless the session is this account")
     ra.add_argument("--write", action="store_true", help="Actually write (default: dry run)")
 
     args = parser.parse_args()
