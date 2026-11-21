@@ -285,6 +285,24 @@ def test_write_proceeds_for_correct_identity_and_posts_save_many():
     assert ol.saved[0][0]["literary_forms"] == [{"key": "/tags/OL184T"}]
 
 
+def test_failed_post_writes_no_audit_row(tmp_path):
+    ol = _one_work_ol("/people/openlibrarytagsbot,2026,hash")
+
+    def boom(url, data=None, headers=None):
+        def raise_for_status():
+            raise RuntimeError("400 bad_data")
+        return types.SimpleNamespace(status_code=400, raise_for_status=raise_for_status)
+
+    ol.session = types.SimpleNamespace(post=boom, cookies=ol.session.cookies)
+    plan = plan_rule(ol, Rule(add_tags=["/tags/OL184T"], subjects=["Nonfiction"]), limit=50)
+    audit = tmp_path / "audit.jsonl"
+    with pytest.raises(RuntimeError, match="400"):
+        apply_rule(ol, plan, comment="c", dry_run=False,
+                   expected_account="openlibrarytagsbot", audit=str(audit))
+    # No phantom "we changed this" row: the file was never written to.
+    assert not audit.exists() or audit.read_text() == ""
+
+
 def test_save_many_request_shape():
     ol = _one_work_ol()
     plan = plan_rule(ol, Rule(add_tags=["/tags/OL184T"], subjects=["Nonfiction"]), limit=50)

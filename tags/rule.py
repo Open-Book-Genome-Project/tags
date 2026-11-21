@@ -367,8 +367,8 @@ def apply_rule(ol, plan: RulePlan, comment: str, batch_size=250, dry_run=True,
     Safety: refuses to write unless the session is ``expected_account`` (when given);
     re-fetches and compares each work's revision immediately before saving (lost-update
     guard); writes in batches of ``batch_size`` via /api/save_many; writes a reversible
-    audit record (base revision + per-field before/after) before each batch when
-    ``audit`` (a file path) is given.
+    audit record (base revision + per-field before/after) after each accepted batch
+    when ``audit`` (a file path) is given.
     """
     docs = build_save_docs(ol, plan, comment)
     if dry_run:
@@ -393,12 +393,14 @@ def apply_rule(ol, plan: RulePlan, comment: str, batch_size=250, dry_run=True,
             if planned is not None and live.get("revision") != planned.revision:
                 continue
             safe.append(doc)
+        req = save_many_request(ol, safe, comment)
+        resp = ol.session.post(req["url"], json.dumps(safe), headers=req["headers"])
+        resp.raise_for_status()
+        # Audit only AFTER the batch is accepted, so a rejected/failed POST
+        # never leaves a phantom "we changed this" row.
         if audit:
             with open(audit, "a", encoding="utf-8") as fh:
                 for doc in safe:
                     fh.write(json.dumps(audit_rows[doc["key"]]) + "\n")
-        req = save_many_request(ol, safe, comment)
-        resp = ol.session.post(req["url"], json.dumps(safe), headers=req["headers"])
-        resp.raise_for_status()
         written += len(safe)
     return {"dry_run": False, "written": written, "planned": len(docs)}
